@@ -3,6 +3,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 import random
@@ -27,7 +28,97 @@ def generate_referral_code(length: int = 6):
 # ------------------------
 # REGISTER
 # ------------------------
-@router.post("/register", response_model=Token)
+
+# @router.post("/register", response_model=Token)
+# async def register(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
+#     full_number = f"{user.country_code}{user.number}"
+
+#     # Check if user already exists
+#     result = await db.execute(select(User).filter(User.number == full_number))
+#     db_user = result.scalar_one_or_none()
+#     if db_user:
+#         raise HTTPException(status_code=400, detail="User already exists")
+
+#     # Generate unique referral code
+#     while True:
+#         referral_code = generate_referral_code()
+#         exists = await db.execute(select(User).filter(User.referral_code == referral_code))
+#         if not exists.scalar_one_or_none():
+#             break
+
+#     # Validate referred_by if provided
+#     referred_by = None
+#     if user.referral:
+#         result = await db.execute(select(User).filter(User.referral_code == user.referral))
+#         ref_user = result.scalar_one_or_none()
+#         if ref_user:
+#             referred_by = user.referral
+
+#     # Check if this is the first user, make admin
+#     result = await db.execute(select(User).limit(1))
+#     is_first_user = result.scalar_one_or_none() is None
+
+
+#     # Create user
+#     new_user = User(
+#         number=full_number,
+#         country_code=user.country_code,
+#         password=hash_password(user.password),
+#         referral_code=referral_code,
+#         referred_by=referred_by,
+#         is_admin=is_first_user,        # first user is admin
+#         is_suspended=False
+#     )
+#     db.add(new_user)
+#     await db.commit()
+#     await db.refresh(new_user)
+
+#     # Create wallet with 0 balances
+#     wallet = Wallet(user_id=new_user.id, balance=0.0, income=0.0)
+#     db.add(wallet)
+#     await db.commit()
+#     await db.refresh(wallet)
+
+#     # Return JWT
+#     access_token = create_access_token({"sub": new_user.number, "user_id": new_user.id})
+#     return {"access_token": access_token, "token_type": "bearer"}
+
+
+# # ------------------------
+# # LOGIN
+# # ------------------------
+# def normalize_number(number: str):
+#     if number.startswith("0"):
+#         return "+254" + number[1:]
+#     return number
+
+# @router.post("/login", response_model=Token)
+# async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_async_db)):
+#     full_number = normalize_number(form_data.username)
+
+#     result = await db.execute(select(User).filter(User.number == full_number))
+#     user = result.scalar_one_or_none()
+#     if not user or not verify_password(form_data.password, user.password):
+#         raise HTTPException(status_code=401, detail="Invalid credentials")
+#     if getattr(user, "is_suspended", False):
+#         raise HTTPException(status_code=403, detail="User is suspended")
+
+#     access_token = create_access_token({"sub": user.number, "user_id": user.id})
+#     return {"access_token": access_token, "token_type": "bearer"}
+
+
+# Define a response model for success messages
+class SuccessResponse(BaseModel):
+    message: str
+
+@router.post(
+    "/register",
+    response_model=SuccessResponse,
+    responses={
+        201: {"description": "User registered successfully."},
+        400: {"description": "User already exists or invalid referral code."}
+    }
+)
 async def register(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
     full_number = f"{user.country_code}{user.number}"
 
@@ -56,7 +147,6 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(select(User).limit(1))
     is_first_user = result.scalar_one_or_none() is None
 
-
     # Create user
     new_user = User(
         number=full_number,
@@ -64,7 +154,7 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
         password=hash_password(user.password),
         referral_code=referral_code,
         referred_by=referred_by,
-        is_admin=is_first_user,        # first user is admin
+        is_admin=is_first_user,
         is_suspended=False
     )
     db.add(new_user)
@@ -77,32 +167,9 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
     await db.commit()
     await db.refresh(wallet)
 
-    # Return JWT
-    access_token = create_access_token({"sub": new_user.number, "user_id": new_user.id})
-    return {"access_token": access_token, "token_type": "bearer"}
+    # Return success message
+    return {"message": "User registered successfully."}
 
-
-# ------------------------
-# LOGIN
-# ------------------------
-def normalize_number(number: str):
-    if number.startswith("0"):
-        return "+254" + number[1:]
-    return number
-
-@router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_async_db)):
-    full_number = normalize_number(form_data.username)
-
-    result = await db.execute(select(User).filter(User.number == full_number))
-    user = result.scalar_one_or_none()
-    if not user or not verify_password(form_data.password, user.password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    if getattr(user, "is_suspended", False):
-        raise HTTPException(status_code=403, detail="User is suspended")
-
-    access_token = create_access_token({"sub": user.number, "user_id": user.id})
-    return {"access_token": access_token, "token_type": "bearer"}
 
 
 # ------------------------
