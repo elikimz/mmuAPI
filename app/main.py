@@ -24,4 +24,7 @@ app.include_router(countries.router)
 
 
 
+@app.get("/")
+async def root():
+    return {"message": "Api is running!"}
 
