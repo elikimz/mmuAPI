@@ -61,7 +61,7 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
     # Validate referred_by if provided
     referred_by = None
     if user.referral:
-        result = await db.execute(select(User).filter(User.referral_code == user.referral))
+        result = await db.execute(select(User).filter(User.id == user.referral))
         ref_user = result.scalar_one_or_none()
         if ref_user:
             referred_by = user.referral
@@ -176,7 +176,7 @@ async def get_all_users(admin: User = Depends(get_current_admin), db: AsyncSessi
             "number": user.number,
             "country_code": user.country_code,
             "referral_code": user.referral_code,
-            "referred_by": user.referred_by,
+            "referred_by": user.id,
             "is_admin": getattr(user, "is_admin", False),
             "is_suspended": getattr(user, "is_suspended", False)
         } for user in users
