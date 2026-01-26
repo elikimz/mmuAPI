@@ -122,7 +122,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
     if not user or not verify_password(form_data.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if getattr(user, "is_suspended", False):
-        raise HTTPException(status_code=403, detail="User is suspended")
+        raise HTTPException(status_code=403, detail="Your account has been suspended. Please contact support.")
 
     access_token = create_access_token({"sub": user.number, "user_id": user.id ,"is_admin": getattr(user, "is_admin", False)})
     return {"access_token": access_token, "token_type": "bearer"}
