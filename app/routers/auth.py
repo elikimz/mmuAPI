@@ -223,17 +223,42 @@ async def change_user_password(user_id: int, new_password: str, admin: User = De
 
 
 # CHANGE USER NUMBER
+
+
+# CHANGE USER NUMBER
 @router.patch("/admin/users/{user_id}/number")
-async def change_user_number(user_id: int, new_number: str, country_code: str, admin: User = Depends(get_current_admin), db: AsyncSession = Depends(get_async_db)):
+async def change_user_number(
+    user_id: int,
+    new_number: str,
+    country_code: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_async_db),
+):
+    # Find the user we want to update
     result = await db.execute(select(User).filter(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Check if new number already exists for another user
     full_number = f"{country_code}{new_number}"
+    result = await db.execute(select(User).filter(User.number == full_number, User.id != user_id))
+    existing_user = result.scalar_one_or_none()
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The number {full_number} is already used by another user."
+        )
+
+    # Update number
     user.number = full_number
     user.country_code = country_code
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    return {"id": user.id, "number": user.number, "country_code": user.country_code, "message": "Number updated successfully"}
+    return {
+        "id": user.id,
+        "number": user.number,
+        "country_code": user.country_code,
+        "message": "Number updated successfully"
+    }
