@@ -32,6 +32,7 @@ class User(Base):
 
     is_admin = Column(Boolean, default=False)
     is_suspended = Column(Boolean, default=False)
+    withdrawal_pin = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -229,11 +230,18 @@ class Withdrawal(Base):
     __tablename__ = "withdrawals"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    # 👤 User info at time of withdrawal
+    name = Column(String, nullable=False)
+    number = Column(String, nullable=False)
+
     amount = Column(Float, nullable=False)
+    status = Column(String, default="pending")  # pending, approved, rejected
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="withdrawals")
+
 
 
 # ==========================

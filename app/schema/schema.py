@@ -127,3 +127,42 @@ class TransactionsListResponse(BaseModel):
 
 class UsersListResponse(BaseModel):
     users: List[UserResponse]
+
+
+
+
+
+class SetWithdrawalPin(BaseModel):
+    pin: str
+
+
+class ChangeWithdrawalPin(BaseModel):
+    old_pin: str
+    new_pin: str
+
+
+
+
+
+class WithdrawalCreate(BaseModel):
+    name: str
+    number: str
+    amount: float
+    pin: str
+
+
+class WithdrawalUpdateStatus(BaseModel):
+    status: str  # approved | rejected
+
+
+class WithdrawalResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    number: str
+    amount: float
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

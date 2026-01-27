@@ -262,3 +262,77 @@ async def change_user_number(
         "country_code": user.country_code,
         "message": "Number updated successfully"
     }
+
+
+
+# -------------------------
+# WITHDRAWAL PIN ROUTES
+# -------------------------
+from pydantic import BaseModel, constr
+from typing import Annotated
+from passlib.context import CryptContext
+
+pwd_context_pin = CryptContext(schemes=["argon2"], deprecated="auto")
+ARGON2_MAX_LENGTH = 128
+
+def hash_pin(pin: str) -> str:
+    return pwd_context_pin.hash(pin[:ARGON2_MAX_LENGTH])
+
+def verify_pin(pin: str, hashed_pin: str) -> bool:
+    return pwd_context_pin.verify(pin[:ARGON2_MAX_LENGTH], hashed_pin)
+
+class SetPinRequest(BaseModel):
+    pin: Annotated[str, constr(min_length=4, max_length=6)]
+
+class ResetPinRequest(BaseModel):
+    user_id: int
+
+# USER: Set own withdrawal PIN
+@router.post("/withdrawal-pin/set")
+async def set_withdrawal_pin(
+    request: SetPinRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    if current_user.withdrawal_pin:
+        raise HTTPException(status_code=400, detail="Withdrawal PIN already set. Use change endpoint if needed.")
+
+    current_user.withdrawal_pin = hash_pin(request.pin)
+    db.add(current_user)
+    await db.commit()
+    await db.refresh(current_user)
+    return {"message": "Withdrawal PIN set successfully"}
+
+# USER: Change existing withdrawal PIN
+@router.post("/withdrawal-pin/change")
+async def change_withdrawal_pin(
+    request: SetPinRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    if not current_user.withdrawal_pin:
+        raise HTTPException(status_code=400, detail="No existing PIN found. Please set a PIN first.")
+
+    current_user.withdrawal_pin = hash_pin(request.pin)
+    db.add(current_user)
+    await db.commit()
+    await db.refresh(current_user)
+    return {"message": "Withdrawal PIN updated successfully"}
+
+# ADMIN: Reset a user's withdrawal PIN
+@router.post("/withdrawal-pin/reset")
+async def admin_reset_withdrawal_pin(
+    request: ResetPinRequest,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(select(User).filter(User.id == request.user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.withdrawal_pin = None
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return {"message": f"Withdrawal PIN for user {user.number} has been reset. User can now set a new PIN."}
