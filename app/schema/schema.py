@@ -143,6 +143,9 @@ class ChangeWithdrawalPin(BaseModel):
 
 
 
+from pydantic import BaseModel
+from datetime import datetime
+
 
 class WithdrawalCreate(BaseModel):
     name: str
@@ -161,6 +164,8 @@ class WithdrawalResponse(BaseModel):
     name: str
     number: str
     amount: float
+    tax: float
+    net_amount: float
     status: str
     created_at: datetime
 

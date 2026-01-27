@@ -226,18 +226,21 @@ class Deposit(Base):
     user = relationship("User", back_populates="deposits")
 
 
+
 class Withdrawal(Base):
     __tablename__ = "withdrawals"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
-    # 👤 User info at time of withdrawal
     name = Column(String, nullable=False)
     number = Column(String, nullable=False)
 
-    amount = Column(Float, nullable=False)
-    status = Column(String, default="pending")  # pending, approved, rejected
+    amount = Column(Float, nullable=False)          # requested amount
+    tax = Column(Float, nullable=False)             # 10% tax
+    net_amount = Column(Float, nullable=False)      # amount after tax
+
+    status = Column(String, default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="withdrawals")
