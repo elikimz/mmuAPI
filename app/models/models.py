@@ -71,12 +71,14 @@ class Level(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True)
+    description = Column(String, nullable=True)
     earnest_money = Column(Float, default=0.0)
     workload = Column(Float, default=0.0)
     salary = Column(Float, default=0.0)
     daily_income = Column(Float, default=0.0)
     monthly_income = Column(Float, default=0.0)
     annual_income = Column(Float, default=0.0)
+    locked = Column(Boolean, default=False)
 
     user_levels = relationship("UserLevel", back_populates="level", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="level", cascade="all, delete-orphan")
@@ -155,6 +157,7 @@ class UserLevel(Base):
     level_id = Column(Integer, ForeignKey("levels.id", ondelete="CASCADE"))
 
     name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
     earnest_money = Column(Float, default=0.0)
     workload = Column(Float, default=0.0)
     salary = Column(Float, default=0.0)

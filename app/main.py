@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth,deposit,withdrawal
+from app.routers import auth,deposit,withdrawal,levels,task,userlevels,usertask
 
 app = FastAPI()
 
@@ -22,6 +22,10 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(deposit.router)
 app.include_router(withdrawal.router)
+app.include_router(levels.router)
+app.include_router(task.router)
+app.include_router(userlevels.router)
+app.include_router(usertask.router)
 
 
 

@@ -171,3 +171,164 @@ class WithdrawalResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+
+
+
+from pydantic import BaseModel
+from typing import Optional
+
+# -------------------------
+# CREATE
+# -------------------------
+class LevelCreate(BaseModel):
+    name: str
+    earnest_money: float = 0.0
+    workload: float = 0.0
+    salary: float = 0.0
+    daily_income: float = 0.0
+    monthly_income: float = 0.0
+    annual_income: float = 0.0
+    locked: Optional[bool] = False  # 👈 new field, default unlocked
+
+# -------------------------
+# UPDATE
+# -------------------------
+class LevelUpdate(BaseModel):
+    name: Optional[str] = None
+    earnest_money: Optional[float] = None
+    workload: Optional[float] = None
+    salary: Optional[float] = None
+    daily_income: Optional[float] = None
+    monthly_income: Optional[float] = None
+    annual_income: Optional[float] = None
+    locked: Optional[bool] = None  # 👈 new field, can lock/unlock
+
+# -------------------------
+# RESPONSE
+# -------------------------
+class LevelResponse(BaseModel):
+    id: int
+    name: str
+    earnest_money: float
+    workload: float
+    salary: float
+    daily_income: float
+    monthly_income: float
+    annual_income: float
+    task_count: int   # 👈 dynamically calculated
+    locked: bool      # 👈 new field in response
+
+    class Config:
+        orm_mode = True
+
+
+
+
+
+# -------------------------
+# CREATE
+# -------------------------
+class TaskCreate(BaseModel):
+    level_id: int
+    name: str
+    reward: float = 0.0
+    video_url: str
+
+
+# -------------------------
+# UPDATE
+# -------------------------
+class TaskUpdate(BaseModel):
+    name: Optional[str] = None
+    reward: Optional[float] = None
+    video_url: Optional[str] = None
+    level_id: Optional[int] = None
+
+
+# -------------------------
+# RESPONSE
+# -------------------------
+class TaskResponse(BaseModel):
+    id: int
+    name: str
+    reward: float
+    video_url: str
+    level_id: int
+
+    class Config:
+        orm_mode = True
+
+
+
+
+
+# -------------------------
+# CREATE / BUY LEVEL
+# -------------------------
+class BuyLevelRequest(BaseModel):
+    level_id: int
+
+
+# -------------------------
+# RESPONSE
+# -------------------------
+class UserLevelResponse(BaseModel):
+    id: int
+    level_id: int
+    name: str
+    description: Optional[str]
+    earnest_money: float
+    workload: float
+    salary: float
+    daily_income: float
+    monthly_income: float
+    annual_income: float
+
+    class Config:
+        orm_mode = True
+
+
+# -------------------------
+# LEVEL INFO (PUBLIC)
+# -------------------------
+class LevelInfoResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    earnest_money: float
+    workload: float
+    salary: float
+    daily_income: float
+    monthly_income: float
+    annual_income: float
+
+    class Config:
+        orm_mode = True
+
+
+
+
+
+
+
+# -------------------------
+# Response for User Task
+# -------------------------
+class UserTaskResponse(BaseModel):
+    id: int
+    user_id: int
+    task_id: int
+    video_url: str
+    completed: bool
+
+    class Config:
+        orm_mode = True
+
+
+# -------------------------
+# Request to complete a task
+# -------------------------
+class CompleteTaskRequest(BaseModel):
+    user_task_id: int
