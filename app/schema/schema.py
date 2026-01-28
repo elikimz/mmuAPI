@@ -184,6 +184,7 @@ from typing import Optional
 # -------------------------
 class LevelCreate(BaseModel):
     name: str
+    description: Optional[str] = None 
     earnest_money: float = 0.0
     workload: float = 0.0
     salary: float = 0.0
@@ -197,6 +198,7 @@ class LevelCreate(BaseModel):
 # -------------------------
 class LevelUpdate(BaseModel):
     name: Optional[str] = None
+    description: Optional[str] = None 
     earnest_money: Optional[float] = None
     workload: Optional[float] = None
     salary: Optional[float] = None
@@ -211,6 +213,7 @@ class LevelUpdate(BaseModel):
 class LevelResponse(BaseModel):
     id: int
     name: str
+    description: Optional[str] = None 
     earnest_money: float
     workload: float
     salary: float

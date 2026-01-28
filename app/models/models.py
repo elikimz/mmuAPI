@@ -111,6 +111,7 @@ class UserTask(Base):
     task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"))
     video_url = Column(String, nullable=False)
     completed = Column(Boolean, default=False)
+    description = Column(String, nullable=True)
 
     user = relationship("User", back_populates="tasks")
     task = relationship("Task", back_populates="user_tasks")
