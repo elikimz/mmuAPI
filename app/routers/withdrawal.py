@@ -33,6 +33,83 @@ def verify_pin(pin: str, hashed_pin: str) -> bool:
 # -------------------------
 # USER: Request Withdrawal
 # -------------------------
+
+
+
+# @router.post("/", response_model=WithdrawalResponse)
+# async def request_withdrawal(
+#     withdrawal: WithdrawalCreate,
+#     current_user: User = Depends(get_current_user),
+#     db: AsyncSession = Depends(get_async_db),
+# ):
+#     if not current_user.withdrawal_pin:
+#         raise HTTPException(status_code=400, detail="Withdrawal PIN not set")
+
+#     if not verify_pin(withdrawal.pin, current_user.withdrawal_pin):
+#         raise HTTPException(status_code=400, detail="Invalid withdrawal PIN")
+
+#     result = await db.execute(
+#         select(Wallet).filter(Wallet.user_id == current_user.id)
+#     )
+#     wallet = result.scalar_one_or_none()
+#     if not wallet:
+#         raise HTTPException(status_code=404, detail="Wallet not found")
+
+#     if wallet.income < withdrawal.amount:
+#         raise HTTPException(status_code=400, detail="Insufficient income balance")
+
+#     # --- TAX CALCULATION ---
+#     tax = round(withdrawal.amount * TAX_RATE, 2)
+#     net_amount = withdrawal.amount - tax
+
+#     # Deduct FULL amount
+#     wallet.income -= withdrawal.amount
+#     db.add(wallet)
+
+#     new_withdrawal = Withdrawal(
+#         user_id=current_user.id,
+#         name=withdrawal.name,
+#         number=withdrawal.number,
+#         amount=withdrawal.amount,
+#         tax=tax,
+#         net_amount=net_amount,
+#         status="pending",
+#         created_at=datetime.utcnow(),
+#     )
+#     db.add(new_withdrawal)
+
+#     # Ledger: withdrawal request
+#     db.add(
+#         Transaction(
+#             user_id=current_user.id,
+#             type="withdrawal_request",
+#             amount=withdrawal.amount,
+#             created_at=datetime.utcnow(),
+#         )
+#     )
+
+#     # Ledger: tax
+#     db.add(
+#         Transaction(
+#             user_id=current_user.id,
+#             type="withdrawal_tax",
+#             amount=tax,
+#             created_at=datetime.utcnow(),
+#         )
+#     )
+
+#     await db.commit()
+#     await db.refresh(new_withdrawal)
+#     return new_withdrawal
+
+
+
+
+
+
+# -------------------------
+# USER: Request Withdrawal
+# -------------------------
 @router.post("/", response_model=WithdrawalResponse)
 async def request_withdrawal(
     withdrawal: WithdrawalCreate,
@@ -44,6 +121,20 @@ async def request_withdrawal(
 
     if not verify_pin(withdrawal.pin, current_user.withdrawal_pin):
         raise HTTPException(status_code=400, detail="Invalid withdrawal PIN")
+
+    # --- CHECK FOR EXISTING PENDING WITHDRAWALS ---
+    pending_result = await db.execute(
+        select(Withdrawal).filter(
+            Withdrawal.user_id == current_user.id,
+            Withdrawal.status == "pending"
+        )
+    )
+    existing_pending = pending_result.scalar_one_or_none()
+    if existing_pending:
+        raise HTTPException(
+            status_code=400,
+            detail="You already have a pending withdrawal. Please wait until it is processed."
+        )
 
     result = await db.execute(
         select(Wallet).filter(Wallet.user_id == current_user.id)
@@ -98,6 +189,10 @@ async def request_withdrawal(
     await db.commit()
     await db.refresh(new_withdrawal)
     return new_withdrawal
+
+
+
+
 
 
 # -------------------------
