@@ -1,4 +1,5 @@
 # schemas.py
+from dataclasses import Field
 from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel
@@ -314,10 +315,8 @@ class LevelInfoResponse(BaseModel):
 
 
 
-
-
 # -------------------------
-# Response for User Task
+# Response for User Task (includes reward)
 # -------------------------
 class UserTaskResponse(BaseModel):
     id: int
@@ -325,13 +324,55 @@ class UserTaskResponse(BaseModel):
     task_id: int
     video_url: str
     completed: bool
+    locked: Optional[bool] = False  
+    reward: float
+    description: Optional[str]
+    level_name: str 
+
 
     class Config:
         orm_mode = True
 
+# -------------------------
+# Response for Pending Task
+# -------------------------
+class UserTaskPendingResponse(BaseModel):
+    id: int
+    user_id: int
+    task_id: int
+    video_url: str
+    pending_until: datetime
+    created_at: datetime
+    reward: float  # Include reward for pending tasks
+    level_name: str 
+
+    class Config:
+        orm_mode = True
+
+# -------------------------
+# Response for Completed Task
+# -------------------------
+class UserTaskCompletedResponse(BaseModel):
+    id: int
+    user_id: int
+    task_id: int
+    video_url: str
+    completed_at: datetime
+    reward: float  # Include reward for completed tasks
+    level_name: str 
+
+    class Config:
+        orm_mode = True
 
 # -------------------------
 # Request to complete a task
 # -------------------------
 class CompleteTaskRequest(BaseModel):
     user_task_id: int
+
+
+
+
+
+
+
