@@ -557,3 +557,34 @@ async def unlock_user_task(
         "description": user_task.description,
         "level_name": user_task.task.level.name  # Include level name
     }
+
+
+
+@router.get("/admin/all", response_model=List[UserTaskResponse])
+async def get_all_user_tasks(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_async_db)
+):
+    result = await db.execute(
+        select(UserTask)
+        .options(joinedload(UserTask.task).joinedload(Task.level))
+    )
+    all_tasks = result.scalars().all()
+
+    tasks_with_reward_and_level = []
+    for user_task in all_tasks:
+        if user_task.task and user_task.task.level:
+            task_data = {
+                "id": user_task.id,
+                "user_id": user_task.user_id,
+                "task_id": user_task.task_id,
+                "video_url": user_task.video_url,
+                "completed": user_task.completed,
+                "locked": user_task.locked if hasattr(user_task, 'locked') else False,
+                "reward": user_task.task.reward,
+                "description": user_task.description,
+                "level_name": user_task.task.level.name
+            }
+            tasks_with_reward_and_level.append(task_data)
+
+    return tasks_with_reward_and_level
