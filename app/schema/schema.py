@@ -374,5 +374,71 @@ class CompleteTaskRequest(BaseModel):
 
 
 
+# =========================
+# WealthFund Schemas
+# =========================
+
+class WealthFundCreate(BaseModel):
+    image: Optional[str] = None
+    name: str
+    amount: float
+    profit_percent: float
+    duration_days: int
+    daily_interest: float
 
 
+class WealthFundUpdate(BaseModel):
+    image: Optional[str] = None
+    name: Optional[str] = None
+    amount: Optional[float] = None
+    profit_percent: Optional[float] = None
+    duration_days: Optional[int] = None
+    daily_interest: Optional[float] = None
+
+
+class WealthFundResponse(BaseModel):
+    id: int
+    image: Optional[str]
+    name: str
+    amount: float
+    profit_percent: float
+    duration_days: int
+    daily_interest: float
+
+    class Config:
+        orm_mode = True
+
+
+
+
+
+
+# =========================
+# User WealthFund Schemas
+# =========================
+
+class InvestWealthFundRequest(BaseModel):
+    wealthfund_id: int
+
+
+class UserWealthFundResponse(BaseModel):
+    id: int
+    wealthfund_id: int
+
+    image: Optional[str]
+    name: str
+    amount: float
+    profit_percent: float
+    duration_days: int
+    daily_interest: float
+
+    total_profit: float
+    today_interest: float
+
+    start_date: datetime
+    end_date: datetime
+    status: str
+    created_at: datetime
+
+    class Config:
+        orm_mode = True

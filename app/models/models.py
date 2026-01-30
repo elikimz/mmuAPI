@@ -176,32 +176,43 @@ class UserLevel(Base):
 # ==========================
 class WealthFund(Base):
     __tablename__ = "wealthfunds"
-
     id = Column(Integer, primary_key=True, index=True)
+    image = Column(String, nullable=True)
     name = Column(String, nullable=False, unique=True)
+    amount = Column(Float, nullable=False)              # investment price
+    profit_percent = Column(Float, nullable=False)      # total profit %
     duration_days = Column(Integer, nullable=False)
-    daily_interest = Column(Float, nullable=False)
-
+    daily_interest = Column(Float, nullable=False)      # computed or fixed per day
+    created_at = Column(DateTime, default=datetime.utcnow)
     user_wealthfunds = relationship(
-        "UserWealthFund", back_populates="wealthfund", cascade="all, delete-orphan"
+        "UserWealthFund",
+        back_populates="wealthfund",
+        cascade="all, delete-orphan"
     )
 
 
 class UserWealthFund(Base):
     __tablename__ = "user_wealthfunds"
-    __table_args__ = (UniqueConstraint("user_id", "wealthfund_id"),)
-
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     wealthfund_id = Column(Integer, ForeignKey("wealthfunds.id", ondelete="CASCADE"))
-
+    image = Column(String, nullable=True)
     name = Column(String, nullable=False)
+    amount = Column(Float, nullable=False)
+    profit_percent = Column(Float, nullable=False)
     duration_days = Column(Integer, nullable=False)
     daily_interest = Column(Float, nullable=False)
+    total_profit = Column(Float, default=0.0)
+    today_interest = Column(Float, default=0.0)
+    start_date = Column(DateTime, default=datetime.utcnow)
+    end_date = Column(DateTime, nullable=False)
+
+    status = Column(String, default="active")  # active | completed | canceled
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="wealthfunds")
     wealthfund = relationship("WealthFund", back_populates="user_wealthfunds")
+
 
 
 # ==========================

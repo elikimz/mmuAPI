@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth,deposit,withdrawal,levels,task,userlevels,usertask
+from app.core.weathfundschedular import start_scheduler
+from app.routers import auth,deposit,withdrawal,levels,task,userlevels,usertask,wealthfund,userweathfund
 
 app = FastAPI()
 
@@ -26,6 +27,8 @@ app.include_router(levels.router)
 app.include_router(task.router)
 app.include_router(userlevels.router)
 app.include_router(usertask.router)
+app.include_router(wealthfund.router)
+app.include_router(userweathfund.router)
 
 
 
@@ -33,3 +36,6 @@ app.include_router(usertask.router)
 async def root():
     return {"message": "Api is running!"}
 
+@app.on_event("startup")
+async def on_startup():
+    start_scheduler()
