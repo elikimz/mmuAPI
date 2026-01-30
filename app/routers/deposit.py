@@ -96,11 +96,40 @@ async def update_deposit_status(
 # -------------------------
 # USER: Get own deposits
 # -------------------------
-@router.get("/me", response_model=List[DepositResponse])
+# @router.get("/me", response_model=List[DepositResponse])
+# async def get_my_deposits(
+#     current_user: User = Depends(get_current_user),
+#     db: AsyncSession = Depends(get_async_db),
+# ):
+#     result = await db.execute(select(Deposit).filter(Deposit.user_id == current_user.id))
+#     deposits = result.scalars().all()
+#     return deposits
+
+
+
+
+@router.get("/me")
 async def get_my_deposits(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
-    result = await db.execute(select(Deposit).filter(Deposit.user_id == current_user.id))
-    deposits = result.scalars().all()
-    return deposits
+    # Get deposits
+    deposits_result = await db.execute(
+        select(Deposit).where(Deposit.user_id == current_user.id)
+    )
+    deposits = deposits_result.scalars().all()
+
+    # Get wallet
+    wallet_result = await db.execute(
+        select(Wallet).where(Wallet.user_id == current_user.id)
+    )
+    wallet = wallet_result.scalar_one_or_none()
+
+    if not wallet:
+        raise HTTPException(status_code=404, detail="Wallet not found")
+
+    return {
+        "wallet_balance": wallet.balance,
+        "wallet_income": wallet.income,
+        "deposits": deposits,
+    }
