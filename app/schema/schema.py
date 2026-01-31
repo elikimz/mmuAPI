@@ -374,6 +374,10 @@ class CompleteTaskRequest(BaseModel):
 
 
 
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime
+
 # =========================
 # WealthFund Schemas
 # =========================
@@ -381,26 +385,21 @@ class CompleteTaskRequest(BaseModel):
 class WealthFundCreate(BaseModel):
     image: Optional[str] = None
     name: str
-    amount: float
     profit_percent: float
     duration_days: int
     daily_interest: float
 
-
 class WealthFundUpdate(BaseModel):
     image: Optional[str] = None
     name: Optional[str] = None
-    amount: Optional[float] = None
     profit_percent: Optional[float] = None
     duration_days: Optional[int] = None
     daily_interest: Optional[float] = None
-
 
 class WealthFundResponse(BaseModel):
     id: int
     image: Optional[str]
     name: str
-    amount: float
     profit_percent: float
     duration_days: int
     daily_interest: float
@@ -408,18 +407,13 @@ class WealthFundResponse(BaseModel):
     class Config:
         orm_mode = True
 
-
-
-
-
-
 # =========================
 # User WealthFund Schemas
 # =========================
 
 class InvestWealthFundRequest(BaseModel):
     wealthfund_id: int
-
+    amount: float  # User's investment amount
 
 class UserWealthFundResponse(BaseModel):
     id: int
@@ -427,7 +421,7 @@ class UserWealthFundResponse(BaseModel):
 
     image: Optional[str]
     name: str
-    amount: float
+    amount: float  # User's investment amount
     profit_percent: float
     duration_days: int
     daily_interest: float

@@ -23,14 +23,13 @@ async def update_daily_interest(db: AsyncSession):
     active_funds = result.scalars().all()
 
     for fund in active_funds:
-        # Today's interest = principal * daily_interest%
+        # Today's interest = user's investment amount * daily_interest%
         today_interest = (fund.daily_interest / 100) * fund.amount
         fund.today_interest = today_interest
         # Total profit so far (without adding to wallet yet)
         fund.total_profit += today_interest
 
     await db.commit()
-
 
 # -------------------------
 # Complete matured wealth funds
@@ -60,7 +59,6 @@ async def complete_matured_funds(db: AsyncSession):
 
     await db.commit()
 
-
 # -------------------------
 # USER: Invest in Wealth Fund
 # -------------------------
@@ -88,11 +86,12 @@ async def invest_in_wealthfund(
     if not wallet:
         raise HTTPException(status_code=400, detail="Wallet not found")
 
-    if wallet.income < wealthfund.amount:
+    # Check if user has enough balance for the investment amount they specified
+    if wallet.income < data.amount:
         raise HTTPException(status_code=400, detail="Insufficient income balance")
 
-    # Deduct investment from wallet income
-    wallet.income -= wealthfund.amount
+    # Deduct user's investment amount from wallet income
+    wallet.income -= data.amount
 
     start_date = datetime.utcnow()
     end_date = start_date + timedelta(days=wealthfund.duration_days)
@@ -102,7 +101,7 @@ async def invest_in_wealthfund(
         wealthfund_id=wealthfund.id,
         image=wealthfund.image,
         name=wealthfund.name,
-        amount=wealthfund.amount,
+        amount=data.amount,  # Use user's investment amount
         profit_percent=wealthfund.profit_percent,
         duration_days=wealthfund.duration_days,
         daily_interest=wealthfund.daily_interest,
@@ -119,7 +118,6 @@ async def invest_in_wealthfund(
     await db.refresh(user_wealthfund)
 
     return user_wealthfund
-
 
 # -------------------------
 # USER: Get My Wealth Funds

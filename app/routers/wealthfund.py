@@ -14,7 +14,6 @@ from app.schema.schema import (
 
 router = APIRouter(prefix="/wealthfunds", tags=["Wealth Funds"])
 
-
 # -------------------------
 # ADMIN: Get all wealth funds
 # -------------------------
@@ -24,7 +23,6 @@ async def get_all_wealthfunds(
 ):
     result = await db.execute(select(WealthFund))
     return result.scalars().all()
-
 
 # -------------------------
 # ADMIN: Create wealth fund
@@ -44,7 +42,6 @@ async def create_wealthfund(
     wealthfund = WealthFund(
         image=data.image,
         name=data.name,
-        amount=data.amount,
         profit_percent=data.profit_percent,
         duration_days=data.duration_days,
         daily_interest=data.daily_interest,
@@ -54,7 +51,6 @@ async def create_wealthfund(
     await db.commit()
     await db.refresh(wealthfund)
     return wealthfund
-
 
 # -------------------------
 # ADMIN: Update wealth fund
@@ -81,7 +77,6 @@ async def update_wealthfund(
     await db.commit()
     await db.refresh(wealthfund)
     return wealthfund
-
 
 # -------------------------
 # ADMIN: Delete wealth fund

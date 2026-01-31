@@ -179,7 +179,6 @@ class WealthFund(Base):
     id = Column(Integer, primary_key=True, index=True)
     image = Column(String, nullable=True)
     name = Column(String, nullable=False, unique=True)
-    amount = Column(Float, nullable=False)              # investment price
     profit_percent = Column(Float, nullable=False)      # total profit %
     duration_days = Column(Integer, nullable=False)
     daily_interest = Column(Float, nullable=False)      # computed or fixed per day
@@ -191,6 +190,9 @@ class WealthFund(Base):
     )
 
 
+
+
+
 class UserWealthFund(Base):
     __tablename__ = "user_wealthfunds"
     id = Column(Integer, primary_key=True, index=True)
@@ -198,7 +200,7 @@ class UserWealthFund(Base):
     wealthfund_id = Column(Integer, ForeignKey("wealthfunds.id", ondelete="CASCADE"))
     image = Column(String, nullable=True)
     name = Column(String, nullable=False)
-    amount = Column(Float, nullable=False)
+    amount = Column(Float, nullable=False)  # User's investment amount
     profit_percent = Column(Float, nullable=False)
     duration_days = Column(Integer, nullable=False)
     daily_interest = Column(Float, nullable=False)
@@ -212,6 +214,7 @@ class UserWealthFund(Base):
 
     user = relationship("User", back_populates="wealthfunds")
     wealthfund = relationship("WealthFund", back_populates="user_wealthfunds")
+
 
 
 
