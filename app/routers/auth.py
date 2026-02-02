@@ -35,6 +35,79 @@ class SuccessResponse(BaseModel):
     message: str
 
 
+
+
+
+# @router.post(
+#     "/register",
+#     response_model=SuccessResponse,
+#     status_code=201,
+# )
+# async def register(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
+#     full_number = f"{user.country_code}{user.number}"
+
+#     # 1. Check if user exists
+#     result = await db.execute(
+#         select(User).where(User.number == full_number)
+#     )
+#     if result.scalar_one_or_none():
+#         raise HTTPException(status_code=400, detail="User already exists")
+
+#     # 2. Generate unique referral code
+#     while True:
+#         referral_code = generate_referral_code()
+#         result = await db.execute(
+#             select(User).where(User.referral_code == referral_code)
+#         )
+#         if not result.scalar_one_or_none():
+#             break
+
+#     # 3. Validate referral
+#     referred_by = None
+#     if user.referral:
+#         result = await db.execute(
+#             select(User).where(User.referral_code == user.referral)
+#         )
+#         ref_user = result.scalar_one_or_none()
+#         if not ref_user:
+#             raise HTTPException(status_code=400, detail="Invalid referral code")
+
+#         referred_by = ref_user.id
+
+#     # 4. First user becomes admin
+#     result = await db.execute(select(User.id).limit(1))
+#     is_first_user = result.scalar_one_or_none() is None
+
+#     # 5. Create user
+#     new_user = User(
+#         number=full_number,
+#         country_code=user.country_code,
+#         password=hash_password(user.password),
+#         referral_code=referral_code,
+#         referred_by=referred_by,
+#         is_admin=is_first_user,
+#         is_suspended=False,
+#     )
+
+#     db.add(new_user)
+#     await db.commit()
+#     await db.refresh(new_user)
+
+#     # 6. Create wallet
+#     wallet = Wallet(
+#         user_id=new_user.id,
+#         balance=0.0,
+#         income=0.0,
+#     )
+#     db.add(wallet)
+#     await db.commit()
+
+#     return {"message": "User registered successfully."}
+
+
+
+
+
 @router.post(
     "/register",
     response_model=SuccessResponse,
@@ -43,39 +116,43 @@ class SuccessResponse(BaseModel):
 async def register(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
     full_number = f"{user.country_code}{user.number}"
 
+    # -------------------------
     # 1. Check if user exists
-    result = await db.execute(
-        select(User).where(User.number == full_number)
-    )
+    # -------------------------
+    result = await db.execute(select(User).where(User.number == full_number))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="User already exists")
 
+    # -------------------------
     # 2. Generate unique referral code
+    # -------------------------
     while True:
         referral_code = generate_referral_code()
-        result = await db.execute(
-            select(User).where(User.referral_code == referral_code)
-        )
+        result = await db.execute(select(User).where(User.referral_code == referral_code))
         if not result.scalar_one_or_none():
             break
 
+    # -------------------------
     # 3. Validate referral
+    # -------------------------
     referred_by = None
+    ref_user = None
     if user.referral:
-        result = await db.execute(
-            select(User).where(User.referral_code == user.referral)
-        )
+        result = await db.execute(select(User).where(User.referral_code == user.referral))
         ref_user = result.scalar_one_or_none()
         if not ref_user:
             raise HTTPException(status_code=400, detail="Invalid referral code")
-
         referred_by = ref_user.id
 
+    # -------------------------
     # 4. First user becomes admin
+    # -------------------------
     result = await db.execute(select(User.id).limit(1))
     is_first_user = result.scalar_one_or_none() is None
 
-    # 5. Create user
+    # -------------------------
+    # 5. Create the new user
+    # -------------------------
     new_user = User(
         number=full_number,
         country_code=user.country_code,
@@ -83,23 +160,58 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
         referral_code=referral_code,
         referred_by=referred_by,
         is_admin=is_first_user,
-        is_suspended=False,
+        is_suspended=False
     )
 
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
 
+    # -------------------------
     # 6. Create wallet
+    # -------------------------
     wallet = Wallet(
         user_id=new_user.id,
         balance=0.0,
-        income=0.0,
+        income=0.0
     )
     db.add(wallet)
     await db.commit()
 
+    # -------------------------
+    # 7. Handle multi-level referrals (A/B/C)
+    # -------------------------
+    if ref_user:
+        from app.models.models import Referral
+
+        levels = ["A", "B", "C"]
+        current_referrer = ref_user
+
+        for level in levels:
+            if not current_referrer:
+                break
+
+            referral_record = Referral(
+                referrer_id=current_referrer.id,
+                referred_id=new_user.id,
+                level=level,
+                is_active=False,
+                bonus_amount=0.0
+            )
+            db.add(referral_record)
+            await db.commit()
+
+            # Move to next level referrer (parent of current_referrer)
+            if current_referrer.referred_by is None:
+                break
+
+            result = await db.execute(select(User).where(User.id == current_referrer.referred_by))
+            current_referrer = result.scalar_one_or_none()
+
     return {"message": "User registered successfully."}
+
+
+
 
 
 

@@ -1,3 +1,8 @@
+
+
+
+
+
 # from fastapi import APIRouter, Depends, HTTPException
 # from sqlalchemy.ext.asyncio import AsyncSession
 # from sqlalchemy.future import select
@@ -29,7 +34,7 @@
 # # -------------------------
 # @router.get("/all", response_model=List[LevelInfoResponse])
 # async def get_all_levels(db: AsyncSession = Depends(get_async_db)):
-#     result = await db.execute(select(Level))
+#     result = await db.execute(select(Level).filter(Level.locked == False))  # Only unlocked levels
 #     return result.scalars().all()
 
 
@@ -47,6 +52,10 @@
 #     level = level_result.scalar_one_or_none()
 #     if not level:
 #         raise HTTPException(status_code=404, detail="Level not found")
+
+#     # Check if level is locked
+#     if level.locked:
+#         raise HTTPException(status_code=403, detail="This level is currently locked")
 
 #     # Fetch user's wallet
 #     wallet_result = await db.execute(select(Wallet).filter(Wallet.user_id == current_user.id))
@@ -120,6 +129,10 @@
 #     level = level_result.scalar_one_or_none()
 #     if not level:
 #         raise HTTPException(status_code=404, detail="Level not found")
+
+#     # Check if level is locked
+#     if level.locked:
+#         raise HTTPException(status_code=403, detail="This level is currently locked")
 
 #     # Fetch user's wallet
 #     wallet_result = await db.execute(select(Wallet).filter(Wallet.user_id == current_user.id))
@@ -200,8 +213,33 @@ from app.database.database import get_async_db
 from app.models.models import User, UserLevel, Level, Wallet, Task, UserTask, Transaction
 from app.routers.auth import get_current_user
 from app.schema.schema import BuyLevelRequest, UserLevelResponse, LevelInfoResponse
+from app.core.referalservices import process_referral_bonus
 
 router = APIRouter(prefix="/user-levels", tags=["User Levels"])
+
+
+# -------------------------
+# Helper to apply bonus to wallet and record transaction
+# -------------------------
+async def apply_referral_bonus(db: AsyncSession, user_id: int, bonus_amount: float, reason: str):
+    wallet_result = await db.execute(select(Wallet).filter(Wallet.user_id == user_id))
+    wallet = wallet_result.scalar_one_or_none()
+    if not wallet:
+        raise HTTPException(status_code=404, detail="User wallet not found")
+
+    # Add bonus to income
+    wallet.income += bonus_amount
+
+    # Record transaction
+    db.add(Transaction(
+        user_id=user_id,
+        type=reason,
+        amount=bonus_amount,
+        created_at=datetime.utcnow()
+    ))
+
+    db.add(wallet)
+    await db.commit()
 
 
 # -------------------------
@@ -234,35 +272,29 @@ async def buy_level(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
-    # Fetch the level to buy
     level_result = await db.execute(select(Level).filter(Level.id == request.level_id))
     level = level_result.scalar_one_or_none()
     if not level:
         raise HTTPException(status_code=404, detail="Level not found")
-
-    # Check if level is locked
     if level.locked:
         raise HTTPException(status_code=403, detail="This level is currently locked")
 
-    # Fetch user's wallet
     wallet_result = await db.execute(select(Wallet).filter(Wallet.user_id == current_user.id))
     wallet = wallet_result.scalar_one_or_none()
     if not wallet:
         raise HTTPException(status_code=404, detail="User wallet not found")
 
-    # Check if user already has a level
     ul_result = await db.execute(select(UserLevel).filter(UserLevel.user_id == current_user.id))
     if ul_result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="You already own a level, use upgrade endpoint")
 
-    # Check balance
     if wallet.balance < level.earnest_money:
         raise HTTPException(status_code=400, detail="Insufficient balance to buy level")
 
     # Deduct balance
     wallet.balance -= level.earnest_money
 
-    # Record transaction
+    # Record transaction for level purchase
     db.add(Transaction(
         user_id=current_user.id,
         type=f"buy {level.name}",
@@ -299,6 +331,19 @@ async def buy_level(
     db.add(wallet)
     await db.commit()
     await db.refresh(user_level)
+
+    # -------------------------
+    # APPLY REFERRAL BONUS TO WALLET SAFELY
+    # -------------------------
+    bonus_amount = await process_referral_bonus(db, purchased_user_id=current_user.id) or 0
+    if bonus_amount > 0:
+        await apply_referral_bonus(
+            db,
+            user_id=current_user.id,
+            bonus_amount=bonus_amount,
+            reason="Referral bonus on purchase"
+        )
+
     return user_level
 
 
@@ -311,28 +356,22 @@ async def upgrade_level(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
-    # Fetch the level to upgrade to
     level_result = await db.execute(select(Level).filter(Level.id == request.level_id))
     level = level_result.scalar_one_or_none()
     if not level:
         raise HTTPException(status_code=404, detail="Level not found")
-
-    # Check if level is locked
     if level.locked:
         raise HTTPException(status_code=403, detail="This level is currently locked")
 
-    # Fetch user's wallet
     wallet_result = await db.execute(select(Wallet).filter(Wallet.user_id == current_user.id))
     wallet = wallet_result.scalar_one_or_none()
     if not wallet:
         raise HTTPException(status_code=404, detail="User wallet not found")
 
-    # Fetch current level
     ul_result = await db.execute(select(UserLevel).filter(UserLevel.user_id == current_user.id))
     current_level = ul_result.scalar_one_or_none()
     if not current_level:
         raise HTTPException(status_code=400, detail="You don't have a level to upgrade, use buy endpoint")
-
     if level.earnest_money <= current_level.earnest_money:
         raise HTTPException(status_code=400, detail="You can only upgrade to a higher level")
 
@@ -340,11 +379,12 @@ async def upgrade_level(
     if wallet.balance < difference:
         raise HTTPException(status_code=400, detail="Insufficient balance to upgrade")
 
-    # Deduct difference from balance and move old level to income
-    wallet.balance -= difference
-    wallet.income += current_level.earnest_money
+    old_level_price = current_level.earnest_money
 
-    # Record transaction
+    # Deduct difference and move old level to income
+    wallet.balance -= difference
+    wallet.income += old_level_price
+
     db.add(Transaction(
         user_id=current_user.id,
         type=f"upgrade {current_level.name} -> {level.name}",
@@ -365,9 +405,9 @@ async def upgrade_level(
     current_level.earnest_money = level.earnest_money
     current_level.workload = level.workload
     current_level.salary = level.salary
-    current_level.daily_income = level.daily_income
-    current_level.monthly_income = level.monthly_income
-    current_level.annual_income = level.annual_income
+    current_level.daily_income = current_level.daily_income
+    current_level.monthly_income = current_level.monthly_income
+    current_level.annual_income = current_level.annual_income
 
     # Assign new tasks
     tasks_result = await db.execute(select(Task).filter(Task.level_id == level.id))
@@ -383,4 +423,18 @@ async def upgrade_level(
     db.add(wallet)
     await db.commit()
     await db.refresh(current_level)
+
+    # -------------------------
+    # APPLY REFERRAL BONUS ONLY IF PREVIOUS LEVEL WAS 0
+    # -------------------------
+    if old_level_price == 0:
+        bonus_amount = await process_referral_bonus(db, purchased_user_id=current_user.id) or 0
+        if bonus_amount > 0:
+            await apply_referral_bonus(
+                db,
+                user_id=current_user.id,
+                bonus_amount=bonus_amount,
+                reason="Referral bonus on upgrade from 0"
+            )
+
     return current_level
