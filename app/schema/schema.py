@@ -436,3 +436,43 @@ class UserWealthFundResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+
+
+
+
+class ReferredUserLevelResponse(BaseModel):
+    name: str
+    earnest_money: float
+    salary: float
+    daily_income: float
+    monthly_income: float
+    annual_income: float
+
+    class Config:
+        orm_mode = True
+
+
+class ReferredUserResponse(BaseModel):
+    id: int
+    number: str
+    country_code: str
+    referral_code: str   # ✅ HERE
+    created_at: datetime
+    level: Optional[ReferredUserLevelResponse]
+
+    class Config:
+        orm_mode = True
+
+
+class MyReferralResponse(BaseModel):
+    id: int
+    level: str
+    is_active: bool
+    bonus_amount: float
+    created_at: datetime
+    referred_user: ReferredUserResponse
+
+    class Config:
+        orm_mode = True
