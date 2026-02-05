@@ -282,20 +282,6 @@ class Withdrawal(Base):
     user = relationship("User", back_populates="withdrawals")
 
 
-# # ==========================
-# # Transactions (Ledger)
-# # ==========================
-# class Transaction(Base):
-#     __tablename__ = "transactions"
-
-#     id = Column(Integer, primary_key=True, index=True)
-#     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
-#     type = Column(String, nullable=False)
-#     amount = Column(Float, nullable=False)
-#     created_at = Column(DateTime, default=datetime.utcnow)
-
-#     user = relationship("User", back_populates="transactions")
-
 
 
 
@@ -306,6 +292,7 @@ class TransactionType(str, Enum):
     TASK_REWARD = "task_reward"
     REFERRAL_BONUS = "referral_bonus"
     WEALTH_FUND_MATURITY = "wealth_fund_maturity"
+    REFERRAL_REBATE = "referral_rebate" 
     DEPOSIT = "deposit"
     COMMISSION = "commission"
 

@@ -593,8 +593,6 @@
 
 
 
-
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -603,20 +601,35 @@ from typing import List
 from datetime import datetime, timedelta
 import asyncio
 
+from app.core.process_task_completion_referral_bonus import process_task_completion_referral_bonus
 from app.database.database import get_async_db
-from app.models.models import User, UserTask, UserTaskPending, UserTaskCompleted, Task, Wallet, Transaction, Level, TransactionType
+from app.models.models import (
+    User,
+    UserTask,
+    UserTaskPending,
+    UserTaskCompleted,
+    Task,
+    Wallet,
+    Transaction,
+    TransactionType,
+)
 from app.routers.auth import get_current_user, get_current_admin
-from app.schema.schema import CompleteTaskRequest, UserTaskResponse, UserTaskPendingResponse, UserTaskCompletedResponse
+from app.schema.schema import (
+    CompleteTaskRequest,
+    UserTaskResponse,
+    UserTaskPendingResponse,
+    UserTaskCompletedResponse,
+)
 
 router = APIRouter(prefix="/user-tasks", tags=["User Tasks"])
 
 # -------------------------
-# USER: Get all tasks assigned to them (with reward and level name)
+# USER: Get my tasks
 # -------------------------
 @router.get("/me", response_model=List[UserTaskResponse])
 async def get_my_tasks(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     result = await db.execute(
         select(UserTask)
@@ -625,161 +638,170 @@ async def get_my_tasks(
     )
     user_tasks = result.scalars().all()
 
-    tasks_with_reward_and_level = []
-    for user_task in user_tasks:
-        if user_task.task and user_task.task.level:
-            task_data = {
-                "id": user_task.id,
-                "user_id": user_task.user_id,
-                "task_id": user_task.task_id,
-                "video_url": user_task.video_url,
-                "completed": user_task.completed,
-                "locked": user_task.locked if hasattr(user_task, 'locked') else False,
-                "reward": user_task.task.reward,
-                "description": user_task.description,
-                "level_name": user_task.task.level.name
-            }
-            tasks_with_reward_and_level.append(task_data)
+    return [
+        {
+            "id": ut.id,
+            "user_id": ut.user_id,
+            "task_id": ut.task_id,
+            "video_url": ut.video_url,
+            "completed": ut.completed,
+            "locked": ut.locked,
+            "reward": ut.task.reward,
+            "description": ut.description,
+            "level_name": ut.task.level.name,
+        }
+        for ut in user_tasks
+        if ut.task and ut.task.level
+    ]
 
-    return tasks_with_reward_and_level
 
 # -------------------------
-# USER: Get all pending tasks (with reward and level name)
+# USER: Pending tasks
 # -------------------------
 @router.get("/me/pending", response_model=List[UserTaskPendingResponse])
 async def get_my_pending_tasks(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     result = await db.execute(
         select(UserTaskPending)
         .options(joinedload(UserTaskPending.task).joinedload(Task.level))
         .filter(UserTaskPending.user_id == current_user.id)
     )
-    pending_tasks = result.scalars().all()
+    pending = result.scalars().all()
 
-    pending_tasks_with_reward_and_level = []
-    for pending_task in pending_tasks:
-        if pending_task.task and pending_task.task.level:
-            task_data = {
-                "id": pending_task.id,
-                "user_id": pending_task.user_id,
-                "task_id": pending_task.task_id,
-                "video_url": pending_task.video_url,
-                "pending_until": pending_task.pending_until,
-                "created_at": pending_task.created_at,
-                "reward": pending_task.task.reward,
-                "level_name": pending_task.task.level.name
-            }
-            pending_tasks_with_reward_and_level.append(task_data)
+    return [
+        {
+            "id": p.id,
+            "user_id": p.user_id,
+            "task_id": p.task_id,
+            "video_url": p.video_url,
+            "pending_until": p.pending_until,
+            "created_at": p.created_at,
+            "reward": p.task.reward,
+            "level_name": p.task.level.name,
+        }
+        for p in pending
+        if p.task and p.task.level
+    ]
 
-    return pending_tasks_with_reward_and_level
 
 # -------------------------
-# USER: Get all completed tasks (with reward and level name)
+# USER: Completed tasks
 # -------------------------
 @router.get("/me/completed", response_model=List[UserTaskCompletedResponse])
 async def get_my_completed_tasks(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     result = await db.execute(
         select(UserTaskCompleted)
         .options(joinedload(UserTaskCompleted.task).joinedload(Task.level))
         .filter(UserTaskCompleted.user_id == current_user.id)
     )
-    completed_tasks = result.scalars().all()
+    completed = result.scalars().all()
 
-    completed_tasks_with_reward_and_level = []
-    for completed_task in completed_tasks:
-        if completed_task.task and completed_task.task.level:
-            task_data = {
-                "id": completed_task.id,
-                "user_id": completed_task.user_id,
-                "task_id": completed_task.task_id,
-                "video_url": completed_task.video_url,
-                "completed_at": completed_task.completed_at,
-                "reward": completed_task.task.reward,
-                "level_name": completed_task.task.level.name
-            }
-            completed_tasks_with_reward_and_level.append(task_data)
+    return [
+        {
+            "id": c.id,
+            "user_id": c.user_id,
+            "task_id": c.task_id,
+            "video_url": c.video_url,
+            "completed_at": c.completed_at,
+            "reward": c.task.reward,
+            "level_name": c.task.level.name,
+        }
+        for c in completed
+        if c.task and c.task.level
+    ]
 
-    return completed_tasks_with_reward_and_level
 
 # -------------------------
-# USER: Complete a task
+# USER: Complete task
 # -------------------------
 @router.post("/complete", response_model=UserTaskResponse)
 async def complete_task(
     request: CompleteTaskRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     result = await db.execute(
         select(UserTask)
         .options(joinedload(UserTask.task).joinedload(Task.level))
-        .filter(UserTask.user_id == current_user.id, UserTask.id == request.user_task_id)
+        .filter(
+            UserTask.user_id == current_user.id,
+            UserTask.id == request.user_task_id,
+        )
     )
     user_task = result.scalar_one_or_none()
+
     if not user_task:
         raise HTTPException(status_code=404, detail="Task not found")
     if user_task.completed:
         raise HTTPException(status_code=400, detail="Task already completed")
     if user_task.locked:
-        raise HTTPException(status_code=403, detail="Task is locked and cannot be completed")
+        raise HTTPException(status_code=403, detail="Task is locked")
 
-    pending_task = UserTaskPending(
+    pending = UserTaskPending(
         user_id=current_user.id,
         task_id=user_task.task_id,
         video_url=user_task.video_url,
         pending_until=datetime.utcnow() + timedelta(seconds=10),
-        created_at=datetime.utcnow()
+        created_at=datetime.utcnow(),
     )
-    db.add(pending_task)
+    db.add(pending)
 
     user_task.completed = True
-    db.add(user_task)
     await db.commit()
     await db.refresh(user_task)
 
-    async def finalize_task(user_task_id: int):
+    async def finalize_task(task_id: int):
         await asyncio.sleep(10)
-        async with AsyncSession(db.bind) as background_db:
-            result = await background_db.execute(
+        async with AsyncSession(db.bind) as bg_db:
+            result = await bg_db.execute(
                 select(UserTaskPending)
-                .options(joinedload(UserTaskPending.task).joinedload(Task.level))
+                .options(joinedload(UserTaskPending.task))
                 .filter(
                     UserTaskPending.user_id == current_user.id,
-                    UserTaskPending.task_id == user_task_id
+                    UserTaskPending.task_id == task_id,
                 )
             )
-            pending = result.scalar_one_or_none()
-            if pending:
-                completed_task = UserTaskCompleted(
-                    user_id=pending.user_id,
-                    task_id=pending.task_id,
-                    video_url=pending.video_url,
-                    completed_at=datetime.utcnow()
+            pending_task = result.scalar_one_or_none()
+            if not pending_task:
+                return
+
+            completed = UserTaskCompleted(
+                user_id=pending_task.user_id,
+                task_id=pending_task.task_id,
+                video_url=pending_task.video_url,
+                completed_at=datetime.utcnow(),
+            )
+            bg_db.add(completed)
+            await bg_db.delete(pending_task)
+
+            wallet = (
+                await bg_db.execute(
+                    select(Wallet).filter(Wallet.user_id == current_user.id)
                 )
-                background_db.add(completed_task)
-                await background_db.delete(pending)
+            ).scalar_one_or_none()
 
-                task = pending.task
-                if task:
-                    wallet_result = await background_db.execute(select(Wallet).filter(Wallet.user_id == current_user.id))
-                    wallet = wallet_result.scalar_one_or_none()
-                    if wallet:
-                        wallet.income += task.reward
-                        background_db.add(wallet)
-                        # Record transaction using enum
-                        background_db.add(Transaction(
-                            user_id=current_user.id,
-                            type=TransactionType.TASK_REWARD.value,  # Updated here
-                            amount=task.reward,
-                            created_at=datetime.utcnow()
-                        ))
+            if wallet:
+                wallet.income += pending_task.task.reward
+                bg_db.add(
+                    Transaction(
+                        user_id=current_user.id,
+                        type=TransactionType.TASK_REWARD.value,
+                        amount=pending_task.task.reward,
+                        created_at=datetime.utcnow(),
+                    )
+                )
 
-                await background_db.commit()
+            await bg_db.commit()
+
+            await process_task_completion_referral_bonus(
+                db=bg_db,
+                completed_user_id=current_user.id,
+            )
 
     asyncio.create_task(finalize_task(user_task.task_id))
 
@@ -792,108 +814,76 @@ async def complete_task(
         "locked": user_task.locked,
         "reward": user_task.task.reward,
         "description": user_task.description,
-        "level_name": user_task.task.level.name
+        "level_name": user_task.task.level.name,
     }
 
+
 # -------------------------
-# ADMIN: Lock a user task
+# ADMIN: Lock / Unlock
 # -------------------------
 @router.patch("/{user_task_id}/lock", response_model=UserTaskResponse)
 async def lock_user_task(
     user_task_id: int,
     admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
-    result = await db.execute(
-        select(UserTask)
-        .options(joinedload(UserTask.task).joinedload(Task.level))
-        .filter(UserTask.id == user_task_id)
-    )
-    user_task = result.scalar_one_or_none()
-    if not user_task:
+    task = (
+        await db.execute(
+            select(UserTask)
+            .options(joinedload(UserTask.task).joinedload(Task.level))
+            .filter(UserTask.id == user_task_id)
+        )
+    ).scalar_one_or_none()
+
+    if not task:
         raise HTTPException(status_code=404, detail="User task not found")
 
-    user_task.locked = True
-    db.add(user_task)
+    task.locked = True
     await db.commit()
-    await db.refresh(user_task)
+    await db.refresh(task)
 
     return {
-        "id": user_task.id,
-        "user_id": user_task.user_id,
-        "task_id": user_task.task_id,
-        "video_url": user_task.video_url,
-        "completed": user_task.completed,
-        "locked": user_task.locked,
-        "reward": user_task.task.reward,
-        "description": user_task.description,
-        "level_name": user_task.task.level.name
+        "id": task.id,
+        "user_id": task.user_id,
+        "task_id": task.task_id,
+        "video_url": task.video_url,
+        "completed": task.completed,
+        "locked": task.locked,
+        "reward": task.task.reward,
+        "description": task.description,
+        "level_name": task.task.level.name,
     }
 
-# -------------------------
-# ADMIN: Unlock a user task
-# -------------------------
+
 @router.patch("/{user_task_id}/unlock", response_model=UserTaskResponse)
 async def unlock_user_task(
     user_task_id: int,
     admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
-    result = await db.execute(
-        select(UserTask)
-        .options(joinedload(UserTask.task).joinedload(Task.level))
-        .filter(UserTask.id == user_task_id)
-    )
-    user_task = result.scalar_one_or_none()
-    if not user_task:
+    task = (
+        await db.execute(
+            select(UserTask)
+            .options(joinedload(UserTask.task).joinedload(Task.level))
+            .filter(UserTask.id == user_task_id)
+        )
+    ).scalar_one_or_none()
+
+    if not task:
         raise HTTPException(status_code=404, detail="User task not found")
 
-    user_task.locked = False
-    db.add(user_task)
+    task.locked = False
     await db.commit()
-    await db.refresh(user_task)
+    await db.refresh(task)
 
     return {
-        "id": user_task.id,
-        "user_id": user_task.user_id,
-        "task_id": user_task.task_id,
-        "video_url": user_task.video_url,
-        "completed": user_task.completed,
-        "locked": user_task.locked,
-        "reward": user_task.task.reward,
-        "description": user_task.description,
-        "level_name": user_task.task.level.name
+        "id": task.id,
+        "user_id": task.user_id,
+        "task_id": task.task_id,
+        "video_url": task.video_url,
+        "completed": task.completed,
+        "locked": task.locked,
+        "reward": task.task.reward,
+        "description": task.description,
+        "level_name": task.task.level.name,
     }
-
-# -------------------------
-# ADMIN: Get all user tasks
-# -------------------------
-@router.get("/admin/all", response_model=List[UserTaskResponse])
-async def get_all_user_tasks(
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db)
-):
-    result = await db.execute(
-        select(UserTask)
-        .options(joinedload(UserTask.task).joinedload(Task.level))
-    )
-    all_tasks = result.scalars().all()
-
-    tasks_with_reward_and_level = []
-    for user_task in all_tasks:
-        if user_task.task and user_task.task.level:
-            task_data = {
-                "id": user_task.id,
-                "user_id": user_task.user_id,
-                "task_id": user_task.task_id,
-                "video_url": user_task.video_url,
-                "completed": user_task.completed,
-                "locked": user_task.locked if hasattr(user_task, 'locked') else False,
-                "reward": user_task.task.reward,
-                "description": user_task.description,
-                "level_name": user_task.task.level.name
-            }
-            tasks_with_reward_and_level.append(task_data)
-
-    return tasks_with_reward_and_level
-
