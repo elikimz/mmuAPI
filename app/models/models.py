@@ -282,15 +282,49 @@ class Withdrawal(Base):
     user = relationship("User", back_populates="withdrawals")
 
 
-# ==========================
-# Transactions (Ledger)
-# ==========================
+# # ==========================
+# # Transactions (Ledger)
+# # ==========================
+# class Transaction(Base):
+#     __tablename__ = "transactions"
+
+#     id = Column(Integer, primary_key=True, index=True)
+#     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+#     type = Column(String, nullable=False)
+#     amount = Column(Float, nullable=False)
+#     created_at = Column(DateTime, default=datetime.utcnow)
+
+#     user = relationship("User", back_populates="transactions")
+
+
+
+
+from enum import Enum
+
+class TransactionType(str, Enum):
+    # Income (Credit)
+    TASK_REWARD = "task_reward"
+    REFERRAL_BONUS = "referral_bonus"
+    WEALTH_FUND_MATURITY = "wealth_fund_maturity"
+    DEPOSIT = "deposit"
+    COMMISSION = "commission"
+
+    # Expenses (Debit)
+    WEALTH_FUND_INVESTMENT = "wealth_fund_investment"
+    WITHDRAWAL_REQUEST = "withdrawal_request"
+    WITHDRAWAL_TAX = "withdrawal_tax"
+    WITHDRAWAL_APPROVED = "withdrawal_approved"
+    WITHDRAWAL_REJECTED_REFUND = "withdrawal_rejected_refund"
+    LEVEL_PURCHASE = "level_purchase"
+    LEVEL_UPGRADE = "level_upgrade"
+
+# In your Transaction model
 class Transaction(Base):
     __tablename__ = "transactions"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
-    type = Column(String, nullable=False)
+    type = Column(String, nullable=False)  # Use TransactionType enum values
     amount = Column(Float, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
