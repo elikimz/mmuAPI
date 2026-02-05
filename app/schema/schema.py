@@ -476,3 +476,50 @@ class MyReferralResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+
+
+
+
+
+
+class WalletResponse(BaseModel):
+    balance: float
+    income: float
+
+
+class LevelResponse(BaseModel):
+    id: int
+    name: str
+    daily_income: float
+    monthly_income: float
+
+
+class WealthFundResponse(BaseModel):
+    id: int
+    name: str
+    amount: float
+    total_profit: float
+    status: str
+
+
+class UserProfileResponse(BaseModel):
+    id: int
+    number: str
+    country_code: str
+    referral_code: str
+    created_at: datetime
+
+    wallet: Optional[WalletResponse]
+    levels: List[LevelResponse]
+
+    total_tasks: int
+    completed_tasks: int
+    pending_tasks: int
+
+    total_referrals: int
+    active_referrals: int
+    referral_bonus: float
+
+    wealthfunds: List[WealthFundResponse]
