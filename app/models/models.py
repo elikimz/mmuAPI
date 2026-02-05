@@ -316,3 +316,17 @@ class Transaction(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="transactions")
+
+
+
+
+# ==========================
+# News
+# ==========================
+class News(Base):
+    __tablename__ = "news"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)    # News headline
+    content = Column(String, nullable=False)  # Full news information
+    created_at = Column(DateTime, default=datetime.utcnow)
