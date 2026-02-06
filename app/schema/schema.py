@@ -39,8 +39,9 @@ class UserBase(BaseModel):
 class UserResponse(UserBase):
     id: int
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 # --------------------------
 # Register / Login Schemas
@@ -81,8 +82,9 @@ class DepositResponse(BaseModel):
     status: str
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 # ==========================
 # Transaction Schemas
@@ -99,8 +101,9 @@ class TransactionResponse(BaseModel):
     amount: float
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 # ==========================
 # Withdrawal Schemas
@@ -114,9 +117,9 @@ class WithdrawalResponse(BaseModel):
     amount: float
     created_at: datetime
 
-    class Config:
-        orm_mode = True
-
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 # ==========================
 # Admin Filters / Responses
 # ==========================
@@ -144,10 +147,6 @@ class ChangeWithdrawalPin(BaseModel):
 
 
 
-from pydantic import BaseModel
-from datetime import datetime
-
-
 class WithdrawalCreate(BaseModel):
     name: str
     number: str
@@ -170,15 +169,12 @@ class WithdrawalResponse(BaseModel):
     status: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 
 
-
-
-from pydantic import BaseModel
-from typing import Optional
 
 # -------------------------
 # CREATE
@@ -224,10 +220,9 @@ class LevelResponse(BaseModel):
     task_count: int   # 👈 dynamically calculated
     locked: bool      # 👈 new field in response
 
-    class Config:
-        orm_mode = True
-
-
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 
 
@@ -261,9 +256,9 @@ class TaskResponse(BaseModel):
     video_url: str
     level_id: int
 
-    class Config:
-        orm_mode = True
-
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 
 
@@ -290,9 +285,9 @@ class UserLevelResponse(BaseModel):
     monthly_income: float
     annual_income: float
 
-    class Config:
-        orm_mode = True
-
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 # -------------------------
 # LEVEL INFO (PUBLIC)
@@ -308,8 +303,9 @@ class LevelInfoResponse(BaseModel):
     monthly_income: float
     annual_income: float
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 
 
@@ -330,8 +326,9 @@ class UserTaskResponse(BaseModel):
     level_name: str 
 
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 # -------------------------
 # Response for Pending Task
@@ -346,8 +343,9 @@ class UserTaskPendingResponse(BaseModel):
     reward: float  # Include reward for pending tasks
     level_name: str 
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 # -------------------------
 # Response for Completed Task
@@ -361,8 +359,9 @@ class UserTaskCompletedResponse(BaseModel):
     reward: float  # Include reward for completed tasks
     level_name: str 
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 # -------------------------
 # Request to complete a task
@@ -372,11 +371,6 @@ class CompleteTaskRequest(BaseModel):
 
 
 
-
-
-from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
 
 # =========================
 # WealthFund Schemas
@@ -404,8 +398,9 @@ class WealthFundResponse(BaseModel):
     duration_days: int
     daily_interest: float
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 # =========================
 # User WealthFund Schemas
@@ -434,8 +429,9 @@ class UserWealthFundResponse(BaseModel):
     status: str
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 
 
@@ -450,8 +446,9 @@ class ReferredUserLevelResponse(BaseModel):
     monthly_income: float
     annual_income: float
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 
 class ReferredUserResponse(BaseModel):
@@ -462,8 +459,9 @@ class ReferredUserResponse(BaseModel):
     created_at: datetime
     level: Optional[ReferredUserLevelResponse]
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 
 class MyReferralResponse(BaseModel):
@@ -474,9 +472,9 @@ class MyReferralResponse(BaseModel):
     created_at: datetime
     referred_user: ReferredUserResponse
 
-    class Config:
-        orm_mode = True
-
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 
 
@@ -496,12 +494,12 @@ class LevelResponse(BaseModel):
     monthly_income: float
 
 
-class WealthFundResponse(BaseModel):
-    id: int
-    name: str
-    amount: float
-    total_profit: float
-    status: str
+# class WealthFundResponse(BaseModel):
+#     id: int
+#     name: str
+#     amount: float
+#     total_profit: float
+#     status: str
 
 
 class UserProfileResponse(BaseModel):
@@ -527,9 +525,6 @@ class UserProfileResponse(BaseModel):
 
 
 
-from pydantic import BaseModel, Field
-from datetime import datetime
-from typing import Optional
 
 # ==========================
 # Gift Code Schemas
@@ -550,8 +545,9 @@ class GiftCodeRead(BaseModel):
     expires_at: Optional[datetime]
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
 
 class GiftCodeRedeem(BaseModel):
     code: str
