@@ -523,3 +523,35 @@ class UserProfileResponse(BaseModel):
     referral_bonus: float
 
     wealthfunds: List[WealthFundResponse]
+
+
+
+
+from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Optional
+
+# ==========================
+# Gift Code Schemas
+# ==========================
+class GiftCodeCreate(BaseModel):
+    code: str
+    amount: float
+    is_active: bool = True
+    max_uses: int = 1
+   
+
+class GiftCodeRead(BaseModel):
+    id: int
+    code: str
+    amount: float
+    is_active: bool
+    max_uses: int
+    expires_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+class GiftCodeRedeem(BaseModel):
+    code: str

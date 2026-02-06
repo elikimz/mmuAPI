@@ -330,3 +330,44 @@ class News(Base):
     title = Column(String, nullable=False)    # News headline
     content = Column(String, nullable=False)  # Full news information
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+
+# ==========================
+# Gift Codes / Coupons
+# ==========================
+class GiftCode(Base):
+    __tablename__ = "gift_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, unique=True, nullable=False, index=True)  # the actual coupon code
+    amount = Column(Float, nullable=False)                          # value credited to user
+    is_active = Column(Boolean, default=True)                       # can the code be used
+    max_uses = Column(Integer, default=1)                            # max times the code can be used
+    expires_at = Column(DateTime, nullable=True)                     # optional expiry date
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Track which users redeemed this code
+    redemptions = relationship(
+        "GiftCodeRedemption",
+        back_populates="gift_code",
+        cascade="all, delete-orphan"
+    )
+
+
+class GiftCodeRedemption(Base):
+    __tablename__ = "gift_code_redemptions"
+    __table_args__ = (UniqueConstraint("user_id", "gift_code_id", name="_user_giftcode_uc"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    gift_code_id = Column(Integer, ForeignKey("gift_codes.id", ondelete="CASCADE"), nullable=False)
+    redeemed_at = Column(DateTime, default=datetime.utcnow)
+    amount_claimed = Column(Float, nullable=False)
+
+    user = relationship("User")
+    gift_code = relationship("GiftCode", back_populates="redemptions")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "gift_code_id", name="unique_user_giftcode"),
+    )

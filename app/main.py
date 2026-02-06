@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.weathfundschedular import start_scheduler
-from app.routers import auth,deposit,withdrawal,levels,task,userlevels,usertask,wealthfund,userweathfund,referals,profile,earnings,me,news
+from app.routers import auth,deposit,withdrawal,levels,task,userlevels,usertask,wealthfund,userweathfund,referals,profile,earnings,me,news,giftcode
 
 app = FastAPI()
 
@@ -34,6 +34,7 @@ app.include_router(profile.router)
 app.include_router(earnings.router)
 app.include_router(me.router)
 app.include_router(news.router)
+app.include_router(giftcode.router)
 
 
 
