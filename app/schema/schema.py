@@ -555,3 +555,55 @@ class GiftCodeRead(BaseModel):
 
 class GiftCodeRedeem(BaseModel):
     code: str
+
+
+
+
+
+
+# --------------------------
+# Reward Schemas
+# --------------------------
+class SpinWheelRewardBase(BaseModel):
+    name: str
+    amount: float
+    weight: Optional[float] = 1.0
+    is_active: Optional[bool] = True
+
+class SpinWheelRewardCreate(SpinWheelRewardBase):
+    pass
+
+class SpinWheelRewardRead(SpinWheelRewardBase):
+    id: int
+    created_at: datetime
+
+    model_config = {
+        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+    }
+
+# --------------------------
+# User Spin Schemas
+# --------------------------
+class UserSpinRead(BaseModel):
+    id: int
+    reward: SpinWheelRewardRead
+    created_at: datetime
+
+    model_config = {
+        "from_attributes": True  # ✅ Required for nested ORM objects
+    }
+
+# --------------------------
+# Spin Wheel Config Schemas
+# --------------------------
+class SpinWheelConfigBase(BaseModel):
+    max_spins_per_day: int = 1
+    is_active: bool = True
+
+class SpinWheelConfigRead(SpinWheelConfigBase):
+    id: int
+    created_at: datetime
+
+    model_config = {
+        "from_attributes": True
+    }

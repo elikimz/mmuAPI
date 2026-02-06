@@ -1,6 +1,7 @@
 
 
 
+
 # from fastapi import APIRouter, Depends, HTTPException
 # from sqlalchemy.ext.asyncio import AsyncSession
 # from sqlalchemy.future import select
@@ -33,7 +34,7 @@
 #     week_start = today_start - timedelta(days=today_start.weekday())  # Monday
 #     month_start = today_start.replace(day=1)
 
-#     # Only positive earnings types
+#     # Only positive earnings types (excluding referral rebate)
 #     earning_types = [
 #         TransactionType.TASK_REWARD,
 #         TransactionType.REFERRAL_BONUS,
@@ -66,15 +67,25 @@
 #     )
 #     total_commission = commission_result.scalar_one_or_none() or 0
 
-#     # Total referral bonuses
-#     referral_result = await db.execute(
+#     # Total referral bonus
+#     referral_bonus_result = await db.execute(
 #         select(func.coalesce(func.sum(Transaction.amount), 0)).filter(
 #             Transaction.user_id == current_user.id,
 #             Transaction.type == TransactionType.REFERRAL_BONUS,
 #             Transaction.amount > 0
 #         )
 #     )
-#     referral_bonus = referral_result.scalar_one_or_none() or 0
+#     referral_bonus = referral_bonus_result.scalar_one_or_none() or 0
+
+#     # Total referral rebate (separate)
+#     referral_rebate_result = await db.execute(
+#         select(func.coalesce(func.sum(Transaction.amount), 0)).filter(
+#             Transaction.user_id == current_user.id,
+#             Transaction.type == TransactionType.REFERRAL_REBATE,
+#             Transaction.amount > 0
+#         )
+#     )
+#     referral_rebate = referral_rebate_result.scalar_one_or_none() or 0
 
 #     return {
 #         "today_earnings": round(today_earnings, 2),
@@ -82,6 +93,7 @@
 #         "month_earnings": round(month_earnings, 2),
 #         "total_commission": round(total_commission, 2),
 #         "referral_bonus": round(referral_bonus, 2),
+#         "referral_rebate": round(referral_rebate, 2),  # separate key
 #     }
 
 
@@ -120,18 +132,20 @@ async def get_earnings_overview(
     week_start = today_start - timedelta(days=today_start.weekday())  # Monday
     month_start = today_start.replace(day=1)
 
-    # Only positive earnings types (excluding referral rebate)
+    # Positive earnings types including gift redemptions
     earning_types = [
         TransactionType.TASK_REWARD,
         TransactionType.REFERRAL_BONUS,
         TransactionType.WEALTH_FUND_MATURITY,
         TransactionType.COMMISSION,
+        TransactionType.GIFT_REDEMPTION,  # ✅ Added gift code earnings
     ]
 
-    async def sum_earnings(start_date: datetime = None):
+    async def sum_earnings(start_date: datetime = None, types: list = None):
+        types = types or earning_types
         query = select(func.coalesce(func.sum(Transaction.amount), 0)).filter(
             Transaction.user_id == current_user.id,
-            Transaction.type.in_(earning_types),
+            Transaction.type.in_(types),
             Transaction.amount > 0
         )
         if start_date:
@@ -144,34 +158,16 @@ async def get_earnings_overview(
     month_earnings = await sum_earnings(month_start)
 
     # Total commission specifically
-    commission_result = await db.execute(
-        select(func.coalesce(func.sum(Transaction.amount), 0)).filter(
-            Transaction.user_id == current_user.id,
-            Transaction.type == TransactionType.COMMISSION,
-            Transaction.amount > 0
-        )
-    )
-    total_commission = commission_result.scalar_one_or_none() or 0
+    total_commission = await sum_earnings(types=[TransactionType.COMMISSION])
 
     # Total referral bonus
-    referral_bonus_result = await db.execute(
-        select(func.coalesce(func.sum(Transaction.amount), 0)).filter(
-            Transaction.user_id == current_user.id,
-            Transaction.type == TransactionType.REFERRAL_BONUS,
-            Transaction.amount > 0
-        )
-    )
-    referral_bonus = referral_bonus_result.scalar_one_or_none() or 0
+    referral_bonus = await sum_earnings(types=[TransactionType.REFERRAL_BONUS])
 
     # Total referral rebate (separate)
-    referral_rebate_result = await db.execute(
-        select(func.coalesce(func.sum(Transaction.amount), 0)).filter(
-            Transaction.user_id == current_user.id,
-            Transaction.type == TransactionType.REFERRAL_REBATE,
-            Transaction.amount > 0
-        )
-    )
-    referral_rebate = referral_rebate_result.scalar_one_or_none() or 0
+    referral_rebate = await sum_earnings(types=[TransactionType.REFERRAL_REBATE])
+
+    # Total gift redemptions (separate)
+    gift_earnings = await sum_earnings(types=[TransactionType.GIFT_REDEMPTION])
 
     return {
         "today_earnings": round(today_earnings, 2),
@@ -179,5 +175,6 @@ async def get_earnings_overview(
         "month_earnings": round(month_earnings, 2),
         "total_commission": round(total_commission, 2),
         "referral_bonus": round(referral_bonus, 2),
-        "referral_rebate": round(referral_rebate, 2),  # separate key
+        "referral_rebate": round(referral_rebate, 2),
+        "gift_earnings": round(gift_earnings, 2),  # ✅ new key
     }

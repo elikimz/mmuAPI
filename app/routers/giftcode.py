@@ -288,8 +288,69 @@ async def delete_gift_code(
         raise HTTPException(status_code=500, detail="Failed to delete gift code")
 
 
+# # =====================================================
+# # Redeem Gift Code (User)
+# # =====================================================
+# @router.post("/redeem/", response_model=GiftCodeRead)
+# async def redeem_gift_code(
+#     payload: GiftCodeRedeem,
+#     user: User = Depends(get_current_user),
+#     db: AsyncSession = Depends(get_async_db)
+# ):
+#     # Find active gift code
+#     result = await db.execute(
+#         select(GiftCode).where(
+#             GiftCode.code == payload.code.upper(),
+#             GiftCode.is_active == True
+#         )
+#     )
+#     db_code = result.scalar_one_or_none()
+
+#     if not db_code:
+#         raise HTTPException(status_code=404, detail="Invalid or inactive gift code")
+
+#     # Check global usage limit
+#     result = await db.execute(
+#         select(GiftCodeRedemption).where(GiftCodeRedemption.gift_code_id == db_code.id)
+#     )
+#     redeemed_count = len(result.scalars().all())
+
+#     if redeemed_count >= db_code.max_uses:
+#         raise HTTPException(status_code=400, detail="Gift code usage limit reached")
+
+#     # Load wallet safely
+#     wallet_result = await db.execute(
+#         select(User)
+#         .where(User.id == user.id)
+#         .options(selectinload(User.wallet))
+#     )
+#     user_with_wallet = wallet_result.scalar_one()
+
+#     # Credit wallet
+#     user_with_wallet.wallet.income += db_code.amount
+
+#     # Save redemption (UniqueConstraint prevents duplicates)
+#     redemption = GiftCodeRedemption(
+#         user_id=user.id,
+#         gift_code_id=db_code.id,
+#         amount_claimed=db_code.amount
+#     )
+#     db.add(redemption)
+
+#     try:
+#         await db.commit()
+#         return db_code
+#     except IntegrityError:
+#         await db.rollback()
+#         raise HTTPException(status_code=400, detail="You already redeemed this code")
+#     except Exception:
+#         await db.rollback()
+#         raise HTTPException(status_code=500, detail="Failed to redeem gift code")
+
+
+
 # =====================================================
-# Redeem Gift Code (User)
+# Redeem Gift Code (User) with Transaction Record
 # =====================================================
 @router.post("/redeem/", response_model=GiftCodeRead)
 async def redeem_gift_code(
@@ -297,7 +358,7 @@ async def redeem_gift_code(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
-    # Find active gift code
+    # 1️⃣ Find active gift code
     result = await db.execute(
         select(GiftCode).where(
             GiftCode.code == payload.code.upper(),
@@ -309,7 +370,7 @@ async def redeem_gift_code(
     if not db_code:
         raise HTTPException(status_code=404, detail="Invalid or inactive gift code")
 
-    # Check global usage limit
+    # 2️⃣ Check global usage limit
     result = await db.execute(
         select(GiftCodeRedemption).where(GiftCodeRedemption.gift_code_id == db_code.id)
     )
@@ -318,7 +379,7 @@ async def redeem_gift_code(
     if redeemed_count >= db_code.max_uses:
         raise HTTPException(status_code=400, detail="Gift code usage limit reached")
 
-    # Load wallet safely
+    # 3️⃣ Load wallet safely
     wallet_result = await db.execute(
         select(User)
         .where(User.id == user.id)
@@ -326,10 +387,10 @@ async def redeem_gift_code(
     )
     user_with_wallet = wallet_result.scalar_one()
 
-    # Credit wallet
-    user_with_wallet.wallet.balance += db_code.amount
+    # 4️⃣ Credit wallet
+    user_with_wallet.wallet.income += db_code.amount
 
-    # Save redemption (UniqueConstraint prevents duplicates)
+    # 5️⃣ Save redemption (UniqueConstraint handles duplicates)
     redemption = GiftCodeRedemption(
         user_id=user.id,
         gift_code_id=db_code.id,
@@ -337,15 +398,31 @@ async def redeem_gift_code(
     )
     db.add(redemption)
 
+    # 6️⃣ Record transaction
+    from app.models.models import Transaction, TransactionType
+    transaction = Transaction(
+        user_id=user.id,
+        type=TransactionType.GIFT_REDEMPTION,  # You can create a new type: e.g., TransactionType.GIFT_REDEMPTION
+        amount=db_code.amount
+    )
+    db.add(transaction)
+
     try:
         await db.commit()
         return db_code
+
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=400, detail="You already redeemed this code")
     except Exception:
         await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to redeem gift code")
+
+
+
+
+
+
 
 
 # =====================================================
