@@ -143,3 +143,16 @@ async def get_spin_history(
             reward=SpinWheelRewardRead.from_orm(reward)
         ))
     return spins_read
+
+
+# --------------------------
+# User: Get active rewards
+# --------------------------
+@router.get("/user/rewards", response_model=List[SpinWheelRewardRead])
+async def get_active_rewards(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(SpinWheelReward).filter(SpinWheelReward.is_active == True))
+    rewards = result.scalars().all()
+    return [SpinWheelRewardRead.from_orm(r) for r in rewards]
