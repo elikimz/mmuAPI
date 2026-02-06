@@ -52,6 +52,11 @@ class User(Base):
     transactions = relationship("Transaction", back_populates="user", cascade="all, delete-orphan")
     referrals_made = relationship("Referral", foreign_keys="Referral.referrer_id", back_populates="referrer", cascade="all, delete-orphan")
     referrals_received = relationship("Referral", foreign_keys="Referral.referred_id", back_populates="referred", cascade="all, delete-orphan")
+    gift_redemptions = relationship(
+        "GiftCodeRedemption",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
 
 
 # ==========================
@@ -333,6 +338,52 @@ class News(Base):
 
 
 
+# # ==========================
+# # Gift Codes / Coupons
+# # ==========================
+# class GiftCode(Base):
+#     __tablename__ = "gift_codes"
+
+#     id = Column(Integer, primary_key=True, index=True)
+#     code = Column(String, unique=True, nullable=False, index=True)  # the actual coupon code
+#     amount = Column(Float, nullable=False)                          # value credited to user
+#     is_active = Column(Boolean, default=True)                       # can the code be used
+#     max_uses = Column(Integer, default=1)                            # max times the code can be used
+#     expires_at = Column(DateTime, nullable=True)                     # optional expiry date
+#     created_at = Column(DateTime, default=datetime.utcnow)
+
+#     # Track which users redeemed this code
+#     redemptions = relationship(
+#         "GiftCodeRedemption",
+#         back_populates="gift_code",
+#         cascade="all, delete-orphan"
+#     )
+
+
+# class GiftCodeRedemption(Base):
+#     __tablename__ = "gift_code_redemptions"
+#     __table_args__ = (UniqueConstraint("user_id", "gift_code_id", name="_user_giftcode_uc"),)
+
+#     id = Column(Integer, primary_key=True, index=True)
+#     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+#     gift_code_id = Column(Integer, ForeignKey("gift_codes.id", ondelete="CASCADE"), nullable=False)
+#     redeemed_at = Column(DateTime, default=datetime.utcnow)
+#     amount_claimed = Column(Float, nullable=False)
+
+#     user = relationship("User")
+#     gift_code = relationship("GiftCode", back_populates="redemptions")
+
+#     __table_args__ = (
+#         UniqueConstraint("user_id", "gift_code_id", name="unique_user_giftcode"),
+#     )
+
+
+
+
+
+
+
+
 # ==========================
 # Gift Codes / Coupons
 # ==========================
@@ -343,8 +394,8 @@ class GiftCode(Base):
     code = Column(String, unique=True, nullable=False, index=True)  # the actual coupon code
     amount = Column(Float, nullable=False)                          # value credited to user
     is_active = Column(Boolean, default=True)                       # can the code be used
-    max_uses = Column(Integer, default=1)                            # max times the code can be used
-    expires_at = Column(DateTime, nullable=True)                     # optional expiry date
+    max_uses = Column(Integer, default=1)                           # max times the code can be used
+    expires_at = Column(DateTime, nullable=True)                    # optional expiry date
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Track which users redeemed this code
@@ -355,9 +406,14 @@ class GiftCode(Base):
     )
 
 
+# ==========================
+# Gift Code Redemptions
+# ==========================
 class GiftCodeRedemption(Base):
     __tablename__ = "gift_code_redemptions"
-    __table_args__ = (UniqueConstraint("user_id", "gift_code_id", name="_user_giftcode_uc"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "gift_code_id", name="unique_user_giftcode"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -365,9 +421,6 @@ class GiftCodeRedemption(Base):
     redeemed_at = Column(DateTime, default=datetime.utcnow)
     amount_claimed = Column(Float, nullable=False)
 
-    user = relationship("User")
+    # Relationships
+    user = relationship("User", back_populates="gift_redemptions")  # new relationship
     gift_code = relationship("GiftCode", back_populates="redemptions")
-
-    __table_args__ = (
-        UniqueConstraint("user_id", "gift_code_id", name="unique_user_giftcode"),
-    )
