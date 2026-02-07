@@ -15,17 +15,20 @@ router = APIRouter(prefix="/app-contacts", tags=["App Contacts"])
 # Schemas
 # ==========================
 class AppContactCreate(BaseModel):
+    name: Optional[str] = None
     number: Optional[str] = None
     whatsapp_link: Optional[str] = None
     customer_link: Optional[str] = None
 
 class AppContactUpdate(BaseModel):
+    name: Optional[str] = None
     number: Optional[str] = None
     whatsapp_link: Optional[str] = None
     customer_link: Optional[str] = None
 
 class AppContactOut(BaseModel):
     id: int
+    name: Optional[str]
     number: Optional[str]
     whatsapp_link: Optional[str]
     customer_link: Optional[str]

@@ -448,7 +448,8 @@ class AppContact(Base):
     __tablename__ = "app_contacts"
 
     id = Column(Integer, primary_key=True, index=True)
-    number = Column(String, nullable=True)      
+    number = Column(String, nullable=True)    
+    name = Column(String, nullable=True)    
     whatsapp_link = Column(String, nullable=True)        
     customer_link = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
