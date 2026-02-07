@@ -437,3 +437,18 @@ class SpinWheelConfig(Base):
     max_spins_per_day = Column(Integer, default=1)   # max spins allowed per user per day
     is_active = Column(Boolean, default=True)        # enable/disable wheel globally
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+
+
+# ==========================
+# App Contact Numbers / Links
+# ==========================
+class AppContact(Base):
+    __tablename__ = "app_contacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    number = Column(String, nullable=True)      
+    whatsapp_link = Column(String, nullable=True)        
+    customer_link = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
