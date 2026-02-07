@@ -10,7 +10,7 @@ from typing import List, Optional
 from app.database.database import get_async_db
 from app.models.models import Level, Task, User
 from app.routers.auth import get_current_admin
-from app.schema.schema import LevelCreate, LevelUpdate, LevelResponse
+from app.schema.schema import FullLevelResponse, LevelCreate, LevelResponse, LevelUpdate
 
 router = APIRouter(prefix="/levels", tags=["Levels"])
 
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/levels", tags=["Levels"])
 # -------------------------
 # PUBLIC: Get all levels (with task count)
 # -------------------------
-@router.get("/", response_model=List[LevelResponse])
+@router.get("/", response_model=List[FullLevelResponse])
 async def get_all_levels(db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(
         select(

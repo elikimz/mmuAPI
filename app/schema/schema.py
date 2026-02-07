@@ -207,7 +207,7 @@ class LevelUpdate(BaseModel):
 # -------------------------
 # RESPONSE
 # -------------------------
-class LevelResponse(BaseModel):
+class FullLevelResponse(BaseModel):
     id: int
     name: str
     description: Optional[str] = None 
@@ -494,12 +494,7 @@ class LevelResponse(BaseModel):
     monthly_income: float
 
 
-# class WealthFundResponse(BaseModel):
-#     id: int
-#     name: str
-#     amount: float
-#     total_profit: float
-#     status: str
+
 
 
 class UserProfileResponse(BaseModel):
