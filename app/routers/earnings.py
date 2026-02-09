@@ -63,7 +63,7 @@ async def get_earnings_overview(
     # Breakdown by type
     total_commission = today_earnings  # ✅ now total earnings instead of only commissions
     referral_bonus = await sum_earnings(types=[TransactionType.REFERRAL_BONUS])
-    referral_rebate = await sum_earnings(types=[TransactionType.REFERRAL_REBATE])
+    referral_rebate = await sum_earnings(types=[TransactionType.GIFT_REDEMPTION])
     gift_earnings = await sum_earnings(types=[TransactionType.GIFT_REDEMPTION])
 
     return {
