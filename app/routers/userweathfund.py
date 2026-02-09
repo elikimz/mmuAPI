@@ -392,7 +392,7 @@ async def invest_in_wealthfund(
     # Record investment transaction
     db.add(Transaction(
         user_id=user.id,
-        type=TransactionType.WEALTHFUND_INVESTMENT.value,
+        type=TransactionType.WEALTH_FUND_INVESTMENT.value,
         amount=data.amount,
         created_at=datetime.utcnow()
     ))
