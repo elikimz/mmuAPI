@@ -333,19 +333,17 @@
 
 
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 from typing import List
-from datetime import datetime, timedelta
-import asyncio
+from datetime import datetime
 
 from app.database.database import get_async_db
 from app.models.models import (
     User,
     UserTask,
-    UserTaskPending,
     UserTaskCompleted,
     Task,
     Wallet,
@@ -356,63 +354,10 @@ from app.routers.auth import get_current_user, get_current_admin
 from app.schema.schema import (
     CompleteTaskRequest,
     UserTaskResponse,
-    UserTaskPendingResponse,
     UserTaskCompletedResponse,
 )
 
 router = APIRouter(prefix="/user-tasks", tags=["User Tasks"])
-
-
-# =====================================================
-# 🔥 BACKGROUND FINALIZER (NEW – VERY IMPORTANT)
-# =====================================================
-async def finalize_task_after_delay(user_id: int, task_id: int, engine):
-    await asyncio.sleep(10)
-
-    async with AsyncSession(engine) as db:
-        result = await db.execute(
-            select(UserTaskPending)
-            .options(joinedload(UserTaskPending.task))
-            .filter(
-                UserTaskPending.user_id == user_id,
-                UserTaskPending.task_id == task_id,
-            )
-        )
-        pending_task = result.scalar_one_or_none()
-
-        if not pending_task:
-            return
-
-        # move to completed
-        completed = UserTaskCompleted(
-            user_id=pending_task.user_id,
-            task_id=pending_task.task_id,
-            video_url=pending_task.video_url,
-            completed_at=datetime.utcnow(),
-        )
-        db.add(completed)
-
-        reward = pending_task.task.reward
-        await db.delete(pending_task)
-
-        # credit wallet
-        wallet = (
-            await db.execute(select(Wallet).filter(Wallet.user_id == user_id))
-        ).scalar_one_or_none()
-
-        if wallet:
-            wallet.income += reward
-            db.add(
-                Transaction(
-                    user_id=user_id,
-                    type=TransactionType.TASK_REWARD.value,
-                    amount=reward,
-                    created_at=datetime.utcnow(),
-                )
-            )
-
-        await db.commit()
-
 
 # -------------------------
 # USER: Get my tasks
@@ -440,30 +385,6 @@ async def get_my_tasks(current_user: User = Depends(get_current_user), db: Async
 
 
 # -------------------------
-# USER: Pending tasks
-# -------------------------
-@router.get("/me/pending", response_model=List[UserTaskPendingResponse])
-async def get_my_pending_tasks(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
-    result = await db.execute(
-        select(UserTaskPending)
-        .options(joinedload(UserTaskPending.task).joinedload(Task.level))
-        .filter(UserTaskPending.user_id == current_user.id)
-    )
-    pending = result.scalars().all()
-
-    return [{
-        "id": p.id,
-        "user_id": p.user_id,
-        "task_id": p.task_id,
-        "video_url": p.video_url,
-        "pending_until": p.pending_until,
-        "created_at": p.created_at,
-        "reward": p.task.reward,
-        "level_name": p.task.level.name,
-    } for p in pending if p.task and p.task.level]
-
-
-# -------------------------
 # USER: Completed tasks
 # -------------------------
 @router.get("/me/completed", response_model=List[UserTaskCompletedResponse])
@@ -487,12 +408,11 @@ async def get_my_completed_tasks(current_user: User = Depends(get_current_user),
 
 
 # =====================================================
-# ✅ COMPLETE TASK (FIXED)
+# 🚀 COMPLETE TASK — INSTANT PAYOUT (FIXED FOREVER)
 # =====================================================
 @router.post("/complete", response_model=UserTaskResponse)
 async def complete_task(
     request: CompleteTaskRequest,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -505,32 +425,50 @@ async def complete_task(
 
     if not user_task:
         raise HTTPException(status_code=404, detail="Task not found")
+
     if user_task.completed:
         raise HTTPException(status_code=400, detail="Task already completed")
+
     if user_task.locked:
         raise HTTPException(status_code=403, detail="Task is locked")
 
-    # move to pending
-    pending = UserTaskPending(
+    reward = user_task.task.reward
+
+    # 💰 get wallet
+    wallet = (
+        await db.execute(select(Wallet).filter(Wallet.user_id == current_user.id))
+    ).scalar_one_or_none()
+
+    if not wallet:
+        raise HTTPException(status_code=404, detail="Wallet not found")
+
+    # 💸 CREDIT USER IMMEDIATELY
+    wallet.income += reward
+
+    # mark task completed
+    user_task.completed = True
+
+    # save completed history
+    completed = UserTaskCompleted(
         user_id=current_user.id,
         task_id=user_task.task_id,
         video_url=user_task.video_url,
-        pending_until=datetime.utcnow() + timedelta(seconds=10),
-        created_at=datetime.utcnow(),
+        completed_at=datetime.utcnow(),
     )
-    db.add(pending)
+    db.add(completed)
 
-    user_task.completed = True
+    # save transaction
+    db.add(
+        Transaction(
+            user_id=current_user.id,
+            type=TransactionType.TASK_REWARD.value,
+            amount=reward,
+            created_at=datetime.utcnow(),
+        )
+    )
+
     await db.commit()
     await db.refresh(user_task)
-
-    # 🔥 schedule background finalizer
-    background_tasks.add_task(
-        finalize_task_after_delay,
-        current_user.id,
-        user_task.task_id,
-        db.bind,
-    )
 
     return {
         "id": user_task.id,
@@ -539,7 +477,7 @@ async def complete_task(
         "video_url": user_task.video_url,
         "completed": user_task.completed,
         "locked": user_task.locked,
-        "reward": user_task.task.reward,
+        "reward": reward,
         "description": user_task.description,
         "level_name": user_task.task.level.name,
     }
