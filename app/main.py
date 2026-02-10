@@ -7,6 +7,7 @@ from app.routers import auth,deposit,withdrawal,levels,task,userlevels,usertask,
 
 app = FastAPI()
 
+
 # ----------------------------
 # CORS Middleware (updated)
 # ----------------------------
