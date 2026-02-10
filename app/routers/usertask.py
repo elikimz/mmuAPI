@@ -9,7 +9,7 @@ from typing import List
 from datetime import datetime, timedelta
 import asyncio
 
-from app.core.process_task_completion_referral_bonus import process_task_completion_referral_bonus
+# from app.core.process_task_completion_referral_bonus import process_task_completion_referral_bonus
 from app.database.database import get_async_db
 from app.models.models import (
     User,
@@ -206,10 +206,10 @@ async def complete_task(
 
             await bg_db.commit()
 
-            await process_task_completion_referral_bonus(
-                db=bg_db,
-                completed_user_id=current_user.id,
-            )
+            # await process_task_completion_referral_bonus(
+            #     db=bg_db,
+            #     completed_user_id=current_user.id,
+            # )
 
     asyncio.create_task(finalize_task(user_task.task_id))
 
