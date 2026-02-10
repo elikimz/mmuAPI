@@ -332,12 +332,14 @@
 
 
 
-from fastapi import APIRouter, Depends, HTTPException
+
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 from typing import List
 from datetime import datetime, timedelta
+import asyncio
 
 from app.database.database import get_async_db
 from app.models.models import (
@@ -360,20 +362,28 @@ from app.schema.schema import (
 
 router = APIRouter(prefix="/user-tasks", tags=["User Tasks"])
 
-# =====================================================
-# 🔥 AUTO PROMOTE EXPIRED PENDING TASKS (CRITICAL FIX)
-# =====================================================
-async def promote_expired_pending_tasks(db: AsyncSession):
-    now = datetime.utcnow()
 
-    result = await db.execute(
-        select(UserTaskPending)
-        .options(joinedload(UserTaskPending.task))
-        .filter(UserTaskPending.pending_until <= now)
-    )
-    expired_tasks = result.scalars().all()
+# =====================================================
+# 🔥 BACKGROUND FINALIZER (NEW – VERY IMPORTANT)
+# =====================================================
+async def finalize_task_after_delay(user_id: int, task_id: int, engine):
+    await asyncio.sleep(10)
 
-    for pending_task in expired_tasks:
+    async with AsyncSession(engine) as db:
+        result = await db.execute(
+            select(UserTaskPending)
+            .options(joinedload(UserTaskPending.task))
+            .filter(
+                UserTaskPending.user_id == user_id,
+                UserTaskPending.task_id == task_id,
+            )
+        )
+        pending_task = result.scalar_one_or_none()
+
+        if not pending_task:
+            return
+
+        # move to completed
         completed = UserTaskCompleted(
             user_id=pending_task.user_id,
             task_id=pending_task.task_id,
@@ -382,26 +392,25 @@ async def promote_expired_pending_tasks(db: AsyncSession):
         )
         db.add(completed)
 
+        reward = pending_task.task.reward
+        await db.delete(pending_task)
+
+        # credit wallet
         wallet = (
-            await db.execute(
-                select(Wallet).filter(Wallet.user_id == pending_task.user_id)
-            )
+            await db.execute(select(Wallet).filter(Wallet.user_id == user_id))
         ).scalar_one_or_none()
 
         if wallet:
-            wallet.income += pending_task.task.reward
+            wallet.income += reward
             db.add(
                 Transaction(
-                    user_id=pending_task.user_id,
+                    user_id=user_id,
                     type=TransactionType.TASK_REWARD.value,
-                    amount=pending_task.task.reward,
+                    amount=reward,
                     created_at=datetime.utcnow(),
                 )
             )
 
-        await db.delete(pending_task)
-
-    if expired_tasks:
         await db.commit()
 
 
@@ -409,10 +418,7 @@ async def promote_expired_pending_tasks(db: AsyncSession):
 # USER: Get my tasks
 # -------------------------
 @router.get("/me", response_model=List[UserTaskResponse])
-async def get_my_tasks(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db),
-):
+async def get_my_tasks(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(
         select(UserTask)
         .options(joinedload(UserTask.task).joinedload(Task.level))
@@ -420,34 +426,24 @@ async def get_my_tasks(
     )
     user_tasks = result.scalars().all()
 
-    return [
-        {
-            "id": ut.id,
-            "user_id": ut.user_id,
-            "task_id": ut.task_id,
-            "video_url": ut.video_url,
-            "completed": ut.completed,
-            "locked": ut.locked,
-            "reward": ut.task.reward,
-            "description": ut.description,
-            "level_name": ut.task.level.name,
-        }
-        for ut in user_tasks
-        if ut.task and ut.task.level
-    ]
+    return [{
+        "id": ut.id,
+        "user_id": ut.user_id,
+        "task_id": ut.task_id,
+        "video_url": ut.video_url,
+        "completed": ut.completed,
+        "locked": ut.locked,
+        "reward": ut.task.reward,
+        "description": ut.description,
+        "level_name": ut.task.level.name,
+    } for ut in user_tasks if ut.task and ut.task.level]
 
 
 # -------------------------
 # USER: Pending tasks
 # -------------------------
 @router.get("/me/pending", response_model=List[UserTaskPendingResponse])
-async def get_my_pending_tasks(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db),
-):
-    # 🔥 auto move expired tasks first
-    await promote_expired_pending_tasks(db)
-
+async def get_my_pending_tasks(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(
         select(UserTaskPending)
         .options(joinedload(UserTaskPending.task).joinedload(Task.level))
@@ -455,33 +451,23 @@ async def get_my_pending_tasks(
     )
     pending = result.scalars().all()
 
-    return [
-        {
-            "id": p.id,
-            "user_id": p.user_id,
-            "task_id": p.task_id,
-            "video_url": p.video_url,
-            "pending_until": p.pending_until,
-            "created_at": p.created_at,
-            "reward": p.task.reward,
-            "level_name": p.task.level.name,
-        }
-        for p in pending
-        if p.task and p.task.level
-    ]
+    return [{
+        "id": p.id,
+        "user_id": p.user_id,
+        "task_id": p.task_id,
+        "video_url": p.video_url,
+        "pending_until": p.pending_until,
+        "created_at": p.created_at,
+        "reward": p.task.reward,
+        "level_name": p.task.level.name,
+    } for p in pending if p.task and p.task.level]
 
 
 # -------------------------
 # USER: Completed tasks
 # -------------------------
 @router.get("/me/completed", response_model=List[UserTaskCompletedResponse])
-async def get_my_completed_tasks(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db),
-):
-    # 🔥 auto move expired tasks first
-    await promote_expired_pending_tasks(db)
-
+async def get_my_completed_tasks(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(
         select(UserTaskCompleted)
         .options(joinedload(UserTaskCompleted.task).joinedload(Task.level))
@@ -489,37 +475,31 @@ async def get_my_completed_tasks(
     )
     completed = result.scalars().all()
 
-    return [
-        {
-            "id": c.id,
-            "user_id": c.user_id,
-            "task_id": c.task_id,
-            "video_url": c.video_url,
-            "completed_at": c.completed_at,
-            "reward": c.task.reward,
-            "level_name": c.task.level.name,
-        }
-        for c in completed
-        if c.task and c.task.level
-    ]
+    return [{
+        "id": c.id,
+        "user_id": c.user_id,
+        "task_id": c.task_id,
+        "video_url": c.video_url,
+        "completed_at": c.completed_at,
+        "reward": c.task.reward,
+        "level_name": c.task.level.name,
+    } for c in completed if c.task and c.task.level]
 
 
-# -------------------------
-# USER: Complete task
-# -------------------------
+# =====================================================
+# ✅ COMPLETE TASK (FIXED)
+# =====================================================
 @router.post("/complete", response_model=UserTaskResponse)
 async def complete_task(
     request: CompleteTaskRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
     result = await db.execute(
         select(UserTask)
         .options(joinedload(UserTask.task).joinedload(Task.level))
-        .filter(
-            UserTask.user_id == current_user.id,
-            UserTask.id == request.user_task_id,
-        )
+        .filter(UserTask.user_id == current_user.id, UserTask.id == request.user_task_id)
     )
     user_task = result.scalar_one_or_none()
 
@@ -530,6 +510,7 @@ async def complete_task(
     if user_task.locked:
         raise HTTPException(status_code=403, detail="Task is locked")
 
+    # move to pending
     pending = UserTaskPending(
         user_id=current_user.id,
         task_id=user_task.task_id,
@@ -543,6 +524,14 @@ async def complete_task(
     await db.commit()
     await db.refresh(user_task)
 
+    # 🔥 schedule background finalizer
+    background_tasks.add_task(
+        finalize_task_after_delay,
+        current_user.id,
+        user_task.task_id,
+        db.bind,
+    )
+
     return {
         "id": user_task.id,
         "user_id": user_task.user_id,
@@ -554,68 +543,3 @@ async def complete_task(
         "description": user_task.description,
         "level_name": user_task.task.level.name,
     }
-
-
-# -------------------------
-# ADMIN: Lock / Unlock
-# -------------------------
-@router.patch("/{user_task_id}/lock", response_model=UserTaskResponse)
-async def lock_user_task(
-    user_task_id: int,
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db),
-):
-    task = (
-        await db.execute(
-            select(UserTask)
-            .options(joinedload(UserTask.task).joinedload(Task.level))
-            .filter(UserTask.id == user_task_id)
-        )
-    ).scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(status_code=404, detail="User task not found")
-
-    task.locked = True
-    await db.commit()
-    await db.refresh(task)
-
-    return {
-        "id": task.id,
-        "user_id": task.user_id,
-        "task_id": task.task_id,
-        "video_url": task.video_url,
-        "completed": task.completed,
-        "locked": task.locked,
-        "reward": task.task.reward,
-        "description": task.description,
-        "level_name": task.task.level.name,
-    }
-
-
-@router.get("/admin/all", response_model=List[UserTaskResponse])
-async def get_all_user_tasks(
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db)
-):
-    result = await db.execute(
-        select(UserTask)
-        .options(joinedload(UserTask.task).joinedload(Task.level))
-    )
-    all_tasks = result.scalars().all()
-
-    return [
-        {
-            "id": t.id,
-            "user_id": t.user_id,
-            "task_id": t.task_id,
-            "video_url": t.video_url,
-            "completed": t.completed,
-            "locked": t.locked,
-            "reward": t.task.reward,
-            "description": t.description,
-            "level_name": t.task.level.name
-        }
-        for t in all_tasks
-        if t.task and t.task.level
-    ]
