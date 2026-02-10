@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# from app.core.taskschedular import start_task_scheduler
+from app.core.taskschedular import start_task_scheduler
 from app.core.weathfundschedular import start_scheduler
 from app.routers import auth,deposit,withdrawal,levels,task,userlevels,usertask,wealthfund,userweathfund,referals,profile,earnings,me,news,giftcode,spinwheel,cotacts
 
@@ -49,5 +49,5 @@ async def root():
 @app.on_event("startup")
 async def on_startup():
     start_scheduler()
-    # start_task_scheduler()
+    start_task_scheduler()
     
