@@ -2,117 +2,118 @@
 
 
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
-from sqlalchemy.exc import IntegrityError
-from typing import List
+# from fastapi import APIRouter, Depends, HTTPException, status
+# from sqlalchemy.ext.asyncio import AsyncSession
+# from sqlalchemy.future import select
+# from sqlalchemy.orm import selectinload
+# from sqlalchemy.exc import IntegrityError
+# from typing import List
 
-from app.database.database import get_async_db
-from app.models.models import GiftCode, GiftCodeRedemption, User, UserLevel
-from app.routers.auth import get_current_admin, get_current_user
-from app.schema.schema import GiftCodeCreate, GiftCodeRead, GiftCodeRedeem
+# from app.database.database import get_async_db
+# from app.models.models import GiftCode, GiftCodeRedemption, User, UserLevel
+# from app.routers.auth import get_current_admin, get_current_user
+# from app.schema.schema import GiftCodeCreate, GiftCodeRead, GiftCodeRedeem
 
-router = APIRouter(prefix="/gift-codes", tags=["Gift Codes"])
-
-
-# =====================================================
-# Get All Gift Codes (Admin)
-# =====================================================
-@router.get("/", response_model=List[GiftCodeRead])
-async def get_all_gift_codes(
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db)
-):
-    result = await db.execute(select(GiftCode).order_by(GiftCode.created_at.desc()))
-    codes = result.scalars().all()
-
-    if not codes:
-        raise HTTPException(status_code=404, detail="No gift codes found")
-
-    return codes
+# router = APIRouter(prefix="/gift-codes", tags=["Gift Codes"])
 
 
-# =====================================================
-# Create Gift Code (Admin)
-# =====================================================
-@router.post("/", response_model=GiftCodeRead, status_code=status.HTTP_201_CREATED)
-async def create_gift_code(
-    code: GiftCodeCreate,
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db)
-):
-    db_code = GiftCode(
-        code=code.code.upper(),
-        amount=code.amount,
-        is_active=code.is_active,
-        max_uses=code.max_uses
-    )
-    db.add(db_code)
+# # =====================================================
+# # Get All Gift Codes (Admin)
+# # =====================================================
+# @router.get("/", response_model=List[GiftCodeRead])
+# async def get_all_gift_codes(
+#     admin: User = Depends(get_current_admin),
+#     db: AsyncSession = Depends(get_async_db)
+# ):
+#     result = await db.execute(select(GiftCode).order_by(GiftCode.created_at.desc()))
+#     codes = result.scalars().all()
 
-    try:
-        await db.commit()
-        await db.refresh(db_code)
-        return db_code
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=400, detail="Gift code already exists")
+#     if not codes:
+#         raise HTTPException(status_code=404, detail="No gift codes found")
+
+#     return codes
 
 
-# =====================================================
-# Update Gift Code (Admin)
-# =====================================================
-@router.put("/{code_id}", response_model=GiftCodeRead)
-async def update_gift_code(
-    code_id: int,
-    code: GiftCodeCreate,
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db)
-):
-    result = await db.execute(select(GiftCode).where(GiftCode.id == code_id))
-    db_code = result.scalar_one_or_none()
+# # =====================================================
+# # Create Gift Code (Admin)
+# # =====================================================
+# @router.post("/", response_model=GiftCodeRead, status_code=status.HTTP_201_CREATED)
+# async def create_gift_code(
+#     code: GiftCodeCreate,
+#     admin: User = Depends(get_current_admin),
+#     db: AsyncSession = Depends(get_async_db)
+# ):
+#     db_code = GiftCode(
+#         code=code.code.upper(),
+#         amount=code.amount,
+#         is_active=code.is_active,
+#         max_uses=code.max_uses
+#     )
+#     db.add(db_code)
 
-    if not db_code:
-        raise HTTPException(status_code=404, detail="Gift code not found")
-
-    db_code.code = code.code.upper()
-    db_code.amount = code.amount
-    db_code.is_active = code.is_active
-    db_code.max_uses = code.max_uses
-
-    try:
-        await db.commit()
-        await db.refresh(db_code)
-        return db_code
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=400, detail="Another gift code with this name already exists")
+#     try:
+#         await db.commit()
+#         await db.refresh(db_code)
+#         return db_code
+#     except IntegrityError:
+#         await db.rollback()
+#         raise HTTPException(status_code=400, detail="Gift code already exists")
 
 
-# =====================================================
-# Delete Gift Code (Admin)
-# =====================================================
-@router.delete("/{code_id}")
-async def delete_gift_code(
-    code_id: int,
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db)
-):
-    result = await db.execute(select(GiftCode).where(GiftCode.id == code_id))
-    db_code = result.scalar_one_or_none()
+# # =====================================================
+# # Update Gift Code (Admin)
+# # =====================================================
+# @router.put("/{code_id}", response_model=GiftCodeRead)
+# async def update_gift_code(
+#     code_id: int,
+#     code: GiftCodeCreate,
+#     admin: User = Depends(get_current_admin),
+#     db: AsyncSession = Depends(get_async_db)
+# ):
+#     result = await db.execute(select(GiftCode).where(GiftCode.id == code_id))
+#     db_code = result.scalar_one_or_none()
 
-    if not db_code:
-        raise HTTPException(status_code=404, detail="Gift code not found")
+#     if not db_code:
+#         raise HTTPException(status_code=404, detail="Gift code not found")
 
-    await db.delete(db_code)
+#     db_code.code = code.code.upper()
+#     db_code.amount = code.amount
+#     db_code.is_active = code.is_active
+#     db_code.max_uses = code.max_uses
 
-    try:
-        await db.commit()
-        return {"message": "Gift code deleted successfully"}
-    except Exception:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to delete gift code")
+#     try:
+#         await db.commit()
+#         await db.refresh(db_code)
+#         return db_code
+#     except IntegrityError:
+#         await db.rollback()
+#         raise HTTPException(status_code=400, detail="Another gift code with this name already exists")
+
+
+# # =====================================================
+# # Delete Gift Code (Admin)
+# # =====================================================
+# @router.delete("/{code_id}")
+# async def delete_gift_code(
+#     code_id: int,
+#     admin: User = Depends(get_current_admin),
+#     db: AsyncSession = Depends(get_async_db)
+# ):
+#     result = await db.execute(select(GiftCode).where(GiftCode.id == code_id))
+#     db_code = result.scalar_one_or_none()
+
+#     if not db_code:
+#         raise HTTPException(status_code=404, detail="Gift code not found")
+
+#     await db.delete(db_code)
+
+#     try:
+#         await db.commit()
+#         return {"message": "Gift code deleted successfully"}
+#     except Exception:
+#         await db.rollback()
+#         raise HTTPException(status_code=500, detail="Failed to delete gift code")
+
 
 
 # # =====================================================
@@ -125,22 +126,29 @@ async def delete_gift_code(
 #     db: AsyncSession = Depends(get_async_db)
 # ):
 #     # =====================================================
-#     # 0️⃣ CHECK USER LEVEL FROM user_levels TABLE (FINAL FIX)
+#     # 0️⃣ MUST HAVE PURCHASED LEVEL (CRITICAL BUSINESS RULE)
 #     # =====================================================
 #     result = await db.execute(
-#         select(UserLevel.name).where(UserLevel.user_id == user.id)
+#         select(UserLevel).where(UserLevel.user_id == user.id)
 #     )
 #     user_level = result.scalar_one_or_none()
 
-#     # 🚫 No level at all → block
+#     # 🚫 No level at all
 #     if not user_level:
 #         raise HTTPException(
 #             status_code=403,
 #             detail="You must purchase a level before redeeming gift codes."
 #         )
 
-#     # 🚫 Interns → block
-#     if user_level.lower() == "intern":
+#     # 🚫 Level exists but NOT purchased (earnest_money = 0)
+#     if user_level.earnest_money <= 0:
+#         raise HTTPException(
+#             status_code=403,
+#             detail="Only users who purchased a level can redeem gift codes."
+#         )
+
+#     # 🚫 Interns blocked
+#     if user_level.name.strip().lower() == "intern":
 #         raise HTTPException(
 #             status_code=403,
 #             detail="Interns are not allowed to redeem gift codes."
@@ -161,7 +169,7 @@ async def delete_gift_code(
 #         raise HTTPException(status_code=404, detail="Invalid or inactive gift code")
 
 #     # =====================================================
-#     # 2️⃣ BLOCK DOUBLE REDEMPTION (per user)
+#     # 2️⃣ Block DOUBLE redemption (per user)
 #     # =====================================================
 #     existing = await db.execute(
 #         select(GiftCodeRedemption).where(
@@ -229,136 +237,183 @@ async def delete_gift_code(
 
 
 
+
+# # =====================================================
+# # Get Gift Code Redemption History (User)
+# # =====================================================
+# @router.get("/my-history/", response_model=List[GiftCodeRead])
+# async def get_my_giftcode_history(
+#     user: User = Depends(get_current_user),
+#     db: AsyncSession = Depends(get_async_db)
+# ):
+#     result = await db.execute(
+#         select(GiftCodeRedemption)
+#         .where(GiftCodeRedemption.user_id == user.id)
+#         .options(selectinload(GiftCodeRedemption.gift_code))
+#         .order_by(GiftCodeRedemption.redeemed_at.desc())
+#     )
+#     redemptions = result.scalars().all()
+
+#     if not redemptions:
+#         raise HTTPException(status_code=404, detail="No gift code redemption history found")
+
+#     return [r.gift_code for r in redemptions]
+
+
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
+from typing import List
+from datetime import datetime
+
+from app.database.database import get_async_db
+from app.models.models import GiftCode, GiftCodeRedemption, User, UserLevel, Transaction, TransactionType
+from app.routers.auth import get_current_admin, get_current_user
+from app.schema.schema import GiftCodeCreate, GiftCodeRead, GiftCodeRedeem
+
+router = APIRouter(prefix="/gift-codes", tags=["Gift Codes"])
+
+
+# =====================================================
+# Get All Gift Codes (Admin)
+# =====================================================
+@router.get("/", response_model=List[GiftCodeRead])
+async def get_all_gift_codes(admin: User = Depends(get_current_admin), db: AsyncSession = Depends(get_async_db)):
+    result = await db.execute(select(GiftCode).order_by(GiftCode.created_at.desc()))
+    codes = result.scalars().all()
+    if not codes:
+        raise HTTPException(status_code=404, detail="No gift codes found")
+    return codes
+
+
+# =====================================================
+# Create Gift Code (Admin)
+# =====================================================
+@router.post("/", response_model=GiftCodeRead, status_code=status.HTTP_201_CREATED)
+async def create_gift_code(code: GiftCodeCreate, admin: User = Depends(get_current_admin), db: AsyncSession = Depends(get_async_db)):
+    sanitized_code = code.code.strip().upper()  # ✅ Trim + uppercase
+    db_code = GiftCode(
+        code=sanitized_code,
+        amount=code.amount,
+        is_active=code.is_active,
+        max_uses=code.max_uses
+    )
+    db.add(db_code)
+    try:
+        await db.commit()
+        await db.refresh(db_code)
+        return db_code
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Gift code already exists")
+
+
+# =====================================================
+# Update Gift Code (Admin)
+# =====================================================
+@router.put("/{code_id}", response_model=GiftCodeRead)
+async def update_gift_code(code_id: int, code: GiftCodeCreate, admin: User = Depends(get_current_admin), db: AsyncSession = Depends(get_async_db)):
+    result = await db.execute(select(GiftCode).where(GiftCode.id == code_id))
+    db_code = result.scalar_one_or_none()
+    if not db_code:
+        raise HTTPException(status_code=404, detail="Gift code not found")
+
+    db_code.code = code.code.strip().upper()  # ✅ Trim + uppercase
+    db_code.amount = code.amount
+    db_code.is_active = code.is_active
+    db_code.max_uses = code.max_uses
+
+    try:
+        await db.commit()
+        await db.refresh(db_code)
+        return db_code
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Another gift code with this name already exists")
+
+
+# =====================================================
+# Delete Gift Code (Admin)
+# =====================================================
+@router.delete("/{code_id}")
+async def delete_gift_code(code_id: int, admin: User = Depends(get_current_admin), db: AsyncSession = Depends(get_async_db)):
+    result = await db.execute(select(GiftCode).where(GiftCode.id == code_id))
+    db_code = result.scalar_one_or_none()
+    if not db_code:
+        raise HTTPException(status_code=404, detail="Gift code not found")
+
+    await db.delete(db_code)
+    try:
+        await db.commit()
+        return {"message": "Gift code deleted successfully"}
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete gift code")
+
+
 # =====================================================
 # Redeem Gift Code (User)
 # =====================================================
 @router.post("/redeem/", response_model=GiftCodeRead)
-async def redeem_gift_code(
-    payload: GiftCodeRedeem,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
-):
-    # =====================================================
-    # 0️⃣ MUST HAVE PURCHASED LEVEL (CRITICAL BUSINESS RULE)
-    # =====================================================
-    result = await db.execute(
-        select(UserLevel).where(UserLevel.user_id == user.id)
-    )
+async def redeem_gift_code(payload: GiftCodeRedeem, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
+    code_to_claim = payload.code.strip().upper()  # ✅ Trim + uppercase
+
+    # 0️⃣ Must have purchased level
+    result = await db.execute(select(UserLevel).where(UserLevel.user_id == user.id))
     user_level = result.scalar_one_or_none()
-
-    # 🚫 No level at all
-    if not user_level:
-        raise HTTPException(
-            status_code=403,
-            detail="You must purchase a level before redeeming gift codes."
-        )
-
-    # 🚫 Level exists but NOT purchased (earnest_money = 0)
-    if user_level.earnest_money <= 0:
-        raise HTTPException(
-            status_code=403,
-            detail="Only users who purchased a level can redeem gift codes."
-        )
-
-    # 🚫 Interns blocked
+    if not user_level or user_level.earnest_money <= 0:
+        raise HTTPException(403, "You must purchase a level before redeeming gift codes.")
     if user_level.name.strip().lower() == "intern":
-        raise HTTPException(
-            status_code=403,
-            detail="Interns are not allowed to redeem gift codes."
-        )
+        raise HTTPException(403, "Interns are not allowed to redeem gift codes.")
 
-    # =====================================================
-    # 1️⃣ Find active gift code
-    # =====================================================
-    result = await db.execute(
-        select(GiftCode).where(
-            GiftCode.code == payload.code.upper(),
-            GiftCode.is_active == True
-        )
-    )
+    # 1️⃣ Find active gift code (case-insensitive)
+    result = await db.execute(select(GiftCode).where(func.upper(func.trim(GiftCode.code)) == code_to_claim, GiftCode.is_active == True))
     db_code = result.scalar_one_or_none()
-
     if not db_code:
-        raise HTTPException(status_code=404, detail="Invalid or inactive gift code")
+        raise HTTPException(404, "Invalid or inactive gift code")
 
-    # =====================================================
-    # 2️⃣ Block DOUBLE redemption (per user)
-    # =====================================================
-    existing = await db.execute(
-        select(GiftCodeRedemption).where(
-            GiftCodeRedemption.user_id == user.id,
-            GiftCodeRedemption.gift_code_id == db_code.id
-        )
-    )
+    # 2️⃣ Prevent double redemption
+    existing = await db.execute(select(GiftCodeRedemption).where(GiftCodeRedemption.user_id == user.id, GiftCodeRedemption.gift_code_id == db_code.id))
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="You already redeemed this code")
+        raise HTTPException(400, "You already redeemed this code")
 
-    # =====================================================
     # 3️⃣ Check global usage limit
-    # =====================================================
-    result = await db.execute(
-        select(GiftCodeRedemption).where(GiftCodeRedemption.gift_code_id == db_code.id)
-    )
-    redeemed_count = len(result.scalars().all())
+    result = await db.execute(select(GiftCodeRedemption).where(GiftCodeRedemption.gift_code_id == db_code.id))
+    if len(result.scalars().all()) >= db_code.max_uses:
+        raise HTTPException(400, "Gift code usage limit reached")
 
-    if redeemed_count >= db_code.max_uses:
-        raise HTTPException(status_code=400, detail="Gift code usage limit reached")
+    # 4️⃣ Load wallet
+    result = await db.execute(select(User).where(User.id == user.id).options(selectinload(User.wallet)))
+    user_with_wallet = result.scalar_one()
 
-    # =====================================================
-    # 4️⃣ Load wallet safely
-    # =====================================================
-    wallet_result = await db.execute(
-        select(User)
-        .where(User.id == user.id)
-        .options(selectinload(User.wallet))
-    )
-    user_with_wallet = wallet_result.scalar_one()
-
-    # =====================================================
     # 5️⃣ Credit wallet
-    # =====================================================
     user_with_wallet.wallet.income += db_code.amount
 
-    # =====================================================
     # 6️⃣ Save redemption
-    # =====================================================
-    redemption = GiftCodeRedemption(
-        user_id=user.id,
-        gift_code_id=db_code.id,
-        amount_claimed=db_code.amount
-    )
+    redemption = GiftCodeRedemption(user_id=user.id, gift_code_id=db_code.id, amount_claimed=db_code.amount, redeemed_at=datetime.utcnow())
     db.add(redemption)
 
-    # =====================================================
     # 7️⃣ Record transaction
-    # =====================================================
-    from app.models.models import Transaction, TransactionType
-    transaction = Transaction(
-        user_id=user.id,
-        type=TransactionType.GIFT_REDEMPTION,
-        amount=db_code.amount
-    )
-    db.add(transaction)
+    db.add(Transaction(user_id=user.id, type=TransactionType.GIFT_REDEMPTION, amount=db_code.amount))
 
     try:
         await db.commit()
+        await db.refresh(db_code)
         return db_code
     except Exception:
         await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to redeem gift code")
-
-
-
+        raise HTTPException(500, "Failed to redeem gift code")
 
 
 # =====================================================
 # Get Gift Code Redemption History (User)
 # =====================================================
 @router.get("/my-history/", response_model=List[GiftCodeRead])
-async def get_my_giftcode_history(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
-):
+async def get_my_giftcode_history(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(
         select(GiftCodeRedemption)
         .where(GiftCodeRedemption.user_id == user.id)
@@ -366,8 +421,6 @@ async def get_my_giftcode_history(
         .order_by(GiftCodeRedemption.redeemed_at.desc())
     )
     redemptions = result.scalars().all()
-
     if not redemptions:
-        raise HTTPException(status_code=404, detail="No gift code redemption history found")
-
+        raise HTTPException(404, "No gift code redemption history found")
     return [r.gift_code for r in redemptions]
