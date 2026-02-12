@@ -76,6 +76,8 @@ router = APIRouter(prefix="/earnings", tags=["Earnings"])
 #         "gift_earnings": round(gift_earnings, 2),
 #     }
 
+
+
 @router.get("/overview", response_model=Dict[str, float])
 async def get_earnings_overview(
     current_user: User = Depends(get_current_user),
@@ -89,21 +91,10 @@ async def get_earnings_overview(
     if not wallet:
         raise HTTPException(status_code=404, detail="Wallet not found")
 
-    # Get current UTC time
-    now_utc = datetime.utcnow()
-
-    # Calculate today's start in Kenya time (UTC+3)
-    kenya_offset = timedelta(hours=3)
-    now_kenya = now_utc + kenya_offset
-    today_start_kenya = now_kenya.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_start_utc = today_start_kenya - kenya_offset  # Convert back to UTC for database query
-
-    # Calculate week and month start in UTC
-    week_start_kenya = today_start_kenya - timedelta(days=today_start_kenya.weekday())  # Monday
-    week_start_utc = week_start_kenya - kenya_offset
-
-    month_start_kenya = today_start_kenya.replace(day=1)
-    month_start_utc = month_start_kenya - kenya_offset
+    now = datetime.utcnow()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today_start - timedelta(days=today_start.weekday())  # Monday
+    month_start = today_start.replace(day=1)
 
     # All positive earnings types
     earning_types = [
@@ -128,17 +119,17 @@ async def get_earnings_overview(
         return result.scalar_one_or_none() or 0
 
     # Totals including all earnings types
-    today_earnings = await sum_earnings(start_date=today_start_utc)
-    week_earnings = await sum_earnings(start_date=week_start_utc)
-    month_earnings = await sum_earnings(start_date=month_start_utc)
+    today_earnings = await sum_earnings(start_date=today_start)
+    week_earnings = await sum_earnings(start_date=week_start)
+    month_earnings = await sum_earnings(start_date=month_start)
 
     # Breakdown by type
     referral_bonus = await sum_earnings(types=[TransactionType.REFERRAL_BONUS])
     referral_rebate = await sum_earnings(types=[TransactionType.REFERRAL_REBATE])
     gift_earnings = await sum_earnings(types=[TransactionType.GIFT_REDEMPTION])
 
-    # Calculate total_commission as the sum of all earnings
-    total_commission = today_earnings + week_earnings + month_earnings + referral_bonus + referral_rebate + gift_earnings
+    # Calculate total_commission as the sum of all specified transaction types
+    total_commission = await sum_earnings()
 
     return {
         "today_earnings": round(today_earnings, 2),
