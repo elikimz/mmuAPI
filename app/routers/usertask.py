@@ -228,18 +228,26 @@ async def complete_task(
                     )
                     wallet = wallet_result.scalar_one_or_none()
 
+                    # Attempt to update wallet and add transaction
+                    wallet_updated = False
                     if wallet:
-                        reward_amount = pending_task.task.reward
-                        wallet.income += reward_amount
-                        bg_db.add(
-                            Transaction(
-                                user_id=user_id,
-                                type=TransactionType.TASK_REWARD.value,
-                                amount=reward_amount,
-                                created_at=datetime.utcnow(),
+                        try:
+                            reward_amount = pending_task.task.reward
+                            wallet.income += reward_amount
+                            bg_db.add(
+                                Transaction(
+                                    user_id=user_id,
+                                    type=TransactionType.TASK_REWARD.value,
+                                    amount=reward_amount,
+                                    created_at=datetime.utcnow(),
+                                )
                             )
-                        )
-                        bg_db.add(wallet)
+                            bg_db.add(wallet)
+                            wallet_updated = True
+                        except Exception as wallet_e:
+                            print(f"Warning: Background task failed to update wallet or add transaction for user {user_id}, task {task_id}: {str(wallet_e)}")
+                            import traceback
+                            print(traceback.format_exc())
 
                     await bg_db.commit()
                     
@@ -249,8 +257,8 @@ async def complete_task(
                         await manager.send_personal_message(user_id, {
                             "type": "TASK_COMPLETED",
                             "task_id": task_id,
-                            "reward": reward_amount if wallet else 0,
-                            "new_income": wallet.income if wallet else 0
+                            "reward": reward_amount if wallet_updated else 0,
+                            "new_income": wallet.income if wallet_updated else 0
                         })
                         print(f"Background task: Task {task_id} finalized for user {user_id}.")
                     except Exception as comm_e:
@@ -258,10 +266,12 @@ async def complete_task(
                         # Do not re-raise, as the transaction is already committed.
 
                 except Exception as bg_e:
+                    # If any error occurs before commit, rollback and log
                     await bg_db.rollback()
                     print(f"Background task error finalizing task {task_id} for user {user_id}: {str(bg_e)}")
                     import traceback
                     print(traceback.format_exc())
+                    # Optionally, re-add the pending task or log for manual review if critical
 
         asyncio.create_task(finalize_task_bg(current_user.id, user_task.task_id, pending.id))
 
