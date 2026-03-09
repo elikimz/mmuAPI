@@ -28,14 +28,14 @@ async def reset_daily_tasks():
                 .values(completed=False)
             )
             
-            # 2. Optional: Clear daily history if needed (UserTaskCompleted/Pending)
-            # For this system, we keep them but the 'completed' flag in UserTask 
-            # is what controls if the user can do the task again today.
+            # 2. Clear UserTaskPending and UserTaskCompleted for the day
+            await session.execute(delete(UserTaskPending))
+            await session.execute(delete(UserTaskCompleted))
             
             await session.commit()
             print(
                 f"[{datetime.now(KENYA_TZ)}] Daily Reset: "
-                f"{result.rowcount} tasks reset for the new day."
+                f"{result.rowcount} tasks reset for the new day. UserTaskPending and UserTaskCompleted cleared."
             )
     except Exception as e:
         print(f"[{datetime.now(KENYA_TZ)}] Error in daily reset: {e}")
