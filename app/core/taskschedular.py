@@ -42,10 +42,11 @@ async def reset_daily_tasks():
 
 async def expire_intern_levels():
     """
-    Expires 'Intern' levels after 3 days.
+    Expires 'Intern' levels after 3 days from purchase.
     """
     try:
         async for session in get_async_db():
+            # Model created_at is UTC
             expiry_time = datetime.utcnow() - timedelta(days=3)
             
             # Find intern levels that are older than 3 days
@@ -60,7 +61,6 @@ async def expire_intern_levels():
                 count = len(expired_levels)
                 for level in expired_levels:
                     # Remove associated tasks for this user
-                    # Note: We filter by user_id. Usually an intern only has intern tasks.
                     await session.execute(
                         delete(UserTask)
                         .where(UserTask.user_id == level.user_id)

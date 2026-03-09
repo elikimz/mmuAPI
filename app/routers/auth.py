@@ -107,42 +107,6 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
     )
     db.add(wallet)
 
-    # -------------------------
-    # 6.5 Auto-assign Intern Level
-    # -------------------------
-    from app.models.models import Level, UserLevel, UserTask, Task
-    from datetime import datetime
-    
-    result = await db.execute(select(Level).filter(Level.name.ilike("intern")))
-    intern_level = result.scalar_one_or_none()
-    
-    if intern_level:
-        user_level = UserLevel(
-            user_id=new_user.id,
-            level_id=intern_level.id,
-            name=intern_level.name,
-            description=intern_level.description,
-            earnest_money=intern_level.earnest_money,
-            workload=intern_level.workload,
-            salary=intern_level.salary,
-            daily_income=intern_level.daily_income,
-            monthly_income=intern_level.monthly_income,
-            annual_income=intern_level.annual_income,
-            created_at=datetime.utcnow()
-        )
-        db.add(user_level)
-        
-        # Assign intern tasks
-        tasks_result = await db.execute(select(Task).filter(Task.level_id == intern_level.id))
-        tasks = tasks_result.scalars().all()
-        for t in tasks:
-            db.add(UserTask(
-                user_id=new_user.id,
-                task_id=t.id,
-                video_url=t.video_url,
-                completed=False
-            ))
-    
     await db.commit()
 
     # -------------------------
