@@ -134,6 +134,8 @@ from app.database.database import get_async_db
 from app.routers.auth import get_current_admin, get_current_user
 from app.schema.schema import DepositCreate, DepositResponse, DepositUpdateStatus
 from typing import List
+from app.core.websocket_manager import manager
+from app.core.redis_cache import cache
 
 from datetime import datetime
 
@@ -218,6 +220,16 @@ async def update_deposit_status(
 
     await db.commit()
     await db.refresh(deposit)
+    
+    # Invalidate cache and notify via WebSocket
+    await cache.delete(f"user_profile_{deposit.user_id}")
+    await manager.send_personal_message(deposit.user_id, {
+        "type": "DEPOSIT_STATUS_UPDATED",
+        "deposit_id": deposit.id,
+        "status": deposit.status,
+        "amount": deposit.amount
+    })
+    
     return deposit
 
 

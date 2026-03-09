@@ -16,6 +16,7 @@ from app.models.models import (
 )
 from app.routers.auth import get_current_user
 from app.schema.schema import UserProfileResponse
+from app.core.redis_cache import cache
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -28,6 +29,11 @@ async def get_user_profile(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    cache_key = f"user_profile_{user.id}"
+    cached_profile = await cache.get(cache_key)
+    if cached_profile:
+        return cached_profile
+
     # Wallet
     wallet_result = await db.execute(
         select(Wallet).where(Wallet.user_id == user.id)
@@ -83,14 +89,17 @@ async def get_user_profile(
     )
     wealthfunds = wf_result.scalars().all()
 
-    return {
+    profile_data = {
         "id": user.id,
         "number": user.number,
         "country_code": user.country_code,
         "referral_code": user.referral_code,
-        "created_at": user.created_at,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
 
-        "wallet": wallet,
+        "wallet": {
+            "balance": wallet.balance if wallet else 0,
+            "income": wallet.income if wallet else 0,
+        },
 
         "levels": [
             {
@@ -121,3 +130,6 @@ async def get_user_profile(
             for wf in wealthfunds
         ],
     }
+    
+    await cache.set(cache_key, profile_data, expire=300) # 5 mins cache
+    return profile_data

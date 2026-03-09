@@ -28,6 +28,8 @@ from app.schema.schema import (
     UserTaskPendingResponse,
     UserTaskCompletedResponse,
 )
+from app.core.websocket_manager import manager
+from app.core.redis_cache import cache
 
 router = APIRouter(prefix="/user-tasks", tags=["User Tasks"])
 
@@ -162,6 +164,9 @@ async def complete_task(
     user_task.completed = True
     await db.commit()
     await db.refresh(user_task)
+    
+    # Invalidate cache
+    await cache.delete(f"user_profile_{current_user.id}")
 
     async def finalize_task(task_id: int):
         await asyncio.sleep(10)
@@ -205,6 +210,15 @@ async def complete_task(
                 )
 
             await bg_db.commit()
+            
+            # Invalidate cache and notify via WebSocket
+            await cache.delete(f"user_profile_{current_user.id}")
+            await manager.send_personal_message(current_user.id, {
+                "type": "TASK_COMPLETED",
+                "task_id": task_id,
+                "reward": pending_task.task.reward,
+                "new_income": wallet.income if wallet else 0
+            })
 
             # await process_task_completion_referral_bonus(
             #     db=bg_db,

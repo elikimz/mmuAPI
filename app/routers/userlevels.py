@@ -11,6 +11,8 @@ from app.database.database import get_async_db
 from app.models.models import Referral, User, UserLevel, Level, Wallet, Task, UserTask, Transaction, TransactionType
 from app.routers.auth import get_current_user
 from app.schema.schema import BuyLevelRequest, UserLevelResponse, LevelInfoResponse
+from app.core.websocket_manager import manager
+from app.core.redis_cache import cache
 
 router = APIRouter(prefix="/user-levels", tags=["User Levels"])
 
@@ -130,6 +132,16 @@ async def buy_level(request: BuyLevelRequest, current_user: User = Depends(get_c
 
         await db.commit()
         await db.refresh(user_level)
+        
+        # Invalidate cache and notify via WebSocket
+        await cache.delete(f"user_profile_{current_user.id}")
+        await manager.send_personal_message(current_user.id, {
+            "type": "LEVEL_PURCHASED",
+            "level_id": level.id,
+            "level_name": level.name,
+            "new_balance": wallet.balance
+        })
+        
         return user_level
 
     except Exception as e:
@@ -210,6 +222,16 @@ async def upgrade_level(request: BuyLevelRequest, current_user: User = Depends(g
 
         await db.commit()
         await db.refresh(current_level)
+        
+        # Invalidate cache and notify via WebSocket
+        await cache.delete(f"user_profile_{current_user.id}")
+        await manager.send_personal_message(current_user.id, {
+            "type": "LEVEL_UPGRADED",
+            "level_id": level.id,
+            "level_name": level.name,
+            "new_balance": wallet.balance
+        })
+        
         return current_level
 
     except Exception as e:
