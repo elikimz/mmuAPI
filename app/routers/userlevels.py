@@ -146,7 +146,7 @@ async def buy_level(request: BuyLevelRequest, current_user: User = Depends(get_c
             })
             print(f"WebSocket message sent for user {current_user.id}.")
         except Exception as comm_e:
-            print(f"Warning: Post-commit action failed for user {current_user.id} after level purchase: {str(comm_e)}")
+            print(f"Warning: Post-commit communication failed for user {current_user.id} after level purchase: {str(comm_e)}")
             # Do not re-raise, as the transaction is already committed.
 
         return user_level
@@ -248,7 +248,7 @@ async def upgrade_level(request: BuyLevelRequest, current_user: User = Depends(g
             })
             print(f"WebSocket message sent for user {current_user.id}.")
         except Exception as comm_e:
-            print(f"Warning: Post-commit action failed for user {current_user.id} after level upgrade: {str(comm_e)}")
+            print(f"Warning: Post-commit communication failed for user {current_user.id} after level upgrade: {str(comm_e)}")
             # Do not re-raise, as the transaction is already committed.
 
         return current_level

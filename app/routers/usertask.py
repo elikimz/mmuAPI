@@ -181,14 +181,18 @@ async def complete_task(
         await db.refresh(user_task)
         await db.refresh(pending)
 
-        # Invalidate cache for immediate UI update
-        await cache.delete(f"user_profile_{current_user.id}")
-        await manager.send_personal_message(current_user.id, {
-            "type": "TASK_SUBMITTED_PENDING",
-            "user_task_id": user_task.id,
-            "task_id": user_task.task_id,
-            "pending_until": pending.pending_until.isoformat()
-        })
+        try:
+            # Invalidate cache for immediate UI update
+            await cache.delete(f"user_profile_{current_user.id}")
+            await manager.send_personal_message(current_user.id, {
+                "type": "TASK_SUBMITTED_PENDING",
+                "user_task_id": user_task.id,
+                "task_id": user_task.task_id,
+                "pending_until": pending.pending_until.isoformat()
+            })
+        except Exception as comm_e:
+            print(f"Warning: Post-commit communication failed for user {current_user.id} after task submission: {str(comm_e)}")
+            # Do not re-raise, as the transaction is already committed.
 
         # Background task to finalize after delay
         async def finalize_task_bg(user_id: int, task_id: int, pending_task_id: int):
@@ -239,15 +243,19 @@ async def complete_task(
 
                     await bg_db.commit()
                     
-                    # Invalidate cache and notify via WebSocket for final completion
-                    await cache.delete(f"user_profile_{user_id}")
-                    await manager.send_personal_message(user_id, {
-                        "type": "TASK_COMPLETED",
-                        "task_id": task_id,
-                        "reward": reward_amount if wallet else 0,
-                        "new_income": wallet.income if wallet else 0
-                    })
-                    print(f"Background task: Task {task_id} finalized for user {user_id}.")
+                    try:
+                        # Invalidate cache and notify via WebSocket for final completion
+                        await cache.delete(f"user_profile_{user_id}")
+                        await manager.send_personal_message(user_id, {
+                            "type": "TASK_COMPLETED",
+                            "task_id": task_id,
+                            "reward": reward_amount if wallet else 0,
+                            "new_income": wallet.income if wallet else 0
+                        })
+                        print(f"Background task: Task {task_id} finalized for user {user_id}.")
+                    except Exception as comm_e:
+                        print(f"Warning: Background task post-commit communication failed for user {user_id} after task finalization: {str(comm_e)}")
+                        # Do not re-raise, as the transaction is already committed.
 
                 except Exception as bg_e:
                     await bg_db.rollback()
