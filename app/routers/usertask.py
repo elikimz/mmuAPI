@@ -152,92 +152,131 @@ async def complete_task(
     if user_task.locked:
         raise HTTPException(status_code=403, detail="Task is locked")
 
-    pending = UserTaskPending(
-        user_id=current_user.id,
-        task_id=user_task.task_id,
-        video_url=user_task.video_url,
-        pending_until=datetime.utcnow() + timedelta(seconds=10),
-        created_at=datetime.utcnow(),
-    )
-    db.add(pending)
-
-    user_task.completed = True
-    await db.commit()
-    await db.refresh(user_task)
-    
-    # Invalidate cache
-    await cache.delete(f"user_profile_{current_user.id}")
-
-    async def finalize_task(task_id: int):
-        await asyncio.sleep(10)
-        async with AsyncSession(db.bind) as bg_db:
-            result = await bg_db.execute(
-                select(UserTaskPending)
-                .options(joinedload(UserTaskPending.task))
-                .filter(
-                    UserTaskPending.user_id == current_user.id,
-                    UserTaskPending.task_id == task_id,
-                )
+    try:
+        # Check if a pending task already exists for this user and task
+        existing_pending = await db.execute(
+            select(UserTaskPending).filter(
+                UserTaskPending.user_id == current_user.id,
+                UserTaskPending.task_id == user_task.task_id
             )
-            pending_task = result.scalar_one_or_none()
-            if not pending_task:
-                return
+        )
+        if existing_pending.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Task is already in pending state.")
 
-            completed = UserTaskCompleted(
-                user_id=pending_task.user_id,
-                task_id=pending_task.task_id,
-                video_url=pending_task.video_url,
-                completed_at=datetime.utcnow(),
-            )
-            bg_db.add(completed)
-            await bg_db.delete(pending_task)
+        # Add to pending tasks
+        pending = UserTaskPending(
+            user_id=current_user.id,
+            task_id=user_task.task_id,
+            video_url=user_task.video_url,
+            pending_until=datetime.utcnow() + timedelta(seconds=10), # 10 seconds delay
+            created_at=datetime.utcnow(),
+        )
+        db.add(pending)
 
-            wallet = (
-                await bg_db.execute(
-                    select(Wallet).filter(Wallet.user_id == current_user.id)
-                )
-            ).scalar_one_or_none()
+        # Mark original user task as completed immediately
+        user_task.completed = True
+        db.add(user_task)
 
-            if wallet:
-                wallet.income += pending_task.task.reward
-                bg_db.add(
-                    Transaction(
-                        user_id=current_user.id,
-                        type=TransactionType.TASK_REWARD.value,
-                        amount=pending_task.task.reward,
-                        created_at=datetime.utcnow(),
+        await db.commit()
+        await db.refresh(user_task)
+        await db.refresh(pending)
+
+        # Invalidate cache for immediate UI update
+        await cache.delete(f"user_profile_{current_user.id}")
+        await manager.send_personal_message(current_user.id, {
+            "type": "TASK_SUBMITTED_PENDING",
+            "user_task_id": user_task.id,
+            "task_id": user_task.task_id,
+            "pending_until": pending.pending_until.isoformat()
+        })
+
+        # Background task to finalize after delay
+        async def finalize_task_bg(user_id: int, task_id: int, pending_task_id: int):
+            await asyncio.sleep(10)
+            async with AsyncSession(db.bind) as bg_db:
+                try:
+                    # Re-fetch pending task within new session
+                    pending_result = await bg_db.execute(
+                        select(UserTaskPending)
+                        .options(joinedload(UserTaskPending.task))
+                        .filter(UserTaskPending.id == pending_task_id)
                     )
-                )
+                    pending_task = pending_result.scalar_one_or_none()
 
-            await bg_db.commit()
-            
-            # Invalidate cache and notify via WebSocket
-            await cache.delete(f"user_profile_{current_user.id}")
-            await manager.send_personal_message(current_user.id, {
-                "type": "TASK_COMPLETED",
-                "task_id": task_id,
-                "reward": pending_task.task.reward,
-                "new_income": wallet.income if wallet else 0
-            })
+                    if not pending_task:
+                        # Task might have been manually processed or removed
+                        print(f"Background task: Pending task {pending_task_id} not found. Skipping finalization.")
+                        return
 
-            # await process_task_completion_referral_bonus(
-            #     db=bg_db,
-            #     completed_user_id=current_user.id,
-            
+                    # Move from pending to completed
+                    completed = UserTaskCompleted(
+                        user_id=user_id,
+                        task_id=task_id,
+                        video_url=pending_task.video_url,
+                        completed_at=datetime.utcnow(),
+                    )
+                    bg_db.add(completed)
+                    await bg_db.delete(pending_task)
 
-    asyncio.create_task(finalize_task(user_task.task_id))
+                    # Update wallet and add transaction
+                    wallet_result = await bg_db.execute(
+                        select(Wallet).filter(Wallet.user_id == user_id)
+                    )
+                    wallet = wallet_result.scalar_one_or_none()
 
-    return {
-        "id": user_task.id,
-        "user_id": user_task.user_id,
-        "task_id": user_task.task_id,
-        "video_url": user_task.video_url,
-        "completed": user_task.completed,
-        "locked": user_task.locked,
-        "reward": user_task.task.reward,
-        "description": user_task.description,
-        "level_name": user_task.task.level.name,
-    }
+                    if wallet:
+                        reward_amount = pending_task.task.reward
+                        wallet.income += reward_amount
+                        bg_db.add(
+                            Transaction(
+                                user_id=user_id,
+                                type=TransactionType.TASK_REWARD.value,
+                                amount=reward_amount,
+                                created_at=datetime.utcnow(),
+                            )
+                        )
+                        bg_db.add(wallet)
+
+                    await bg_db.commit()
+                    
+                    # Invalidate cache and notify via WebSocket for final completion
+                    await cache.delete(f"user_profile_{user_id}")
+                    await manager.send_personal_message(user_id, {
+                        "type": "TASK_COMPLETED",
+                        "task_id": task_id,
+                        "reward": reward_amount if wallet else 0,
+                        "new_income": wallet.income if wallet else 0
+                    })
+                    print(f"Background task: Task {task_id} finalized for user {user_id}.")
+
+                except Exception as bg_e:
+                    await bg_db.rollback()
+                    print(f"Background task error finalizing task {task_id} for user {user_id}: {str(bg_e)}")
+                    import traceback
+                    print(traceback.format_exc())
+
+        asyncio.create_task(finalize_task_bg(current_user.id, user_task.task_id, pending.id))
+
+        return {
+            "id": user_task.id,
+            "user_id": user_task.user_id,
+            "task_id": user_task.task_id,
+            "video_url": user_task.video_url,
+            "completed": user_task.completed,
+            "locked": user_task.locked,
+            "reward": user_task.task.reward,
+            "description": user_task.description,
+            "level_name": user_task.task.level.name,
+        }
+
+    except HTTPException:
+        raise # Re-raise FastAPI HTTPExceptions
+    except Exception as e:
+        await db.rollback()
+        print(f"Error completing task for user {current_user.id}, task {request.user_task_id}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
 
 
 # -------------------------

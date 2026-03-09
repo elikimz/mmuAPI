@@ -132,21 +132,33 @@ async def buy_level(request: BuyLevelRequest, current_user: User = Depends(get_c
 
         await db.commit()
         await db.refresh(user_level)
+        print(f"User {current_user.id} successfully purchased level {level.name}. Transaction committed.")
         
-        # Invalidate cache and notify via WebSocket
-        await cache.delete(f"user_profile_{current_user.id}")
-        await manager.send_personal_message(current_user.id, {
-            "type": "LEVEL_PURCHASED",
-            "level_id": level.id,
-            "level_name": level.name,
-            "new_balance": wallet.balance
-        })
-        
+        try:
+            # Invalidate cache and notify via WebSocket
+            await cache.delete(f"user_profile_{current_user.id}")
+            print(f"Cache invalidated for user {current_user.id}.")
+            await manager.send_personal_message(current_user.id, {
+                "type": "LEVEL_PURCHASED",
+                "level_id": level.id,
+                "level_name": level.name,
+                "new_balance": wallet.balance
+            })
+            print(f"WebSocket message sent for user {current_user.id}.")
+        except Exception as comm_e:
+            print(f"Warning: Post-commit action failed for user {current_user.id} after level purchase: {str(comm_e)}")
+            # Do not re-raise, as the transaction is already committed.
+
         return user_level
 
+    except HTTPException:
+        raise # Re-raise FastAPI HTTPExceptions
     except Exception as e:
         await db.rollback()
-        raise HTTPException(500, f"An error occurred during purchase: {str(e)}")
+        print(f"Error purchasing level for user {current_user.id}, level {request.level_id}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred during purchase: {str(e)}")
 
 
 # ============================================================
@@ -222,18 +234,30 @@ async def upgrade_level(request: BuyLevelRequest, current_user: User = Depends(g
 
         await db.commit()
         await db.refresh(current_level)
-        
-        # Invalidate cache and notify via WebSocket
-        await cache.delete(f"user_profile_{current_user.id}")
-        await manager.send_personal_message(current_user.id, {
-            "type": "LEVEL_UPGRADED",
-            "level_id": level.id,
-            "level_name": level.name,
-            "new_balance": wallet.balance
-        })
-        
+        print(f"User {current_user.id} successfully upgraded to level {level.name}. Transaction committed.")
+
+        try:
+            # Invalidate cache and notify via WebSocket
+            await cache.delete(f"user_profile_{current_user.id}")
+            print(f"Cache invalidated for user {current_user.id}.")
+            await manager.send_personal_message(current_user.id, {
+                "type": "LEVEL_UPGRADED",
+                "level_id": level.id,
+                "level_name": level.name,
+                "new_balance": wallet.balance
+            })
+            print(f"WebSocket message sent for user {current_user.id}.")
+        except Exception as comm_e:
+            print(f"Warning: Post-commit action failed for user {current_user.id} after level upgrade: {str(comm_e)}")
+            # Do not re-raise, as the transaction is already committed.
+
         return current_level
 
+    except HTTPException:
+        raise # Re-raise FastAPI HTTPExceptions
     except Exception as e:
         await db.rollback()
-        raise HTTPException(500, f"An error occurred during upgrade: {str(e)}")
+        print(f"Error upgrading level for user {current_user.id}, level {request.level_id}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred during upgrade: {str(e)}")
