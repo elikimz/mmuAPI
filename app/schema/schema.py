@@ -598,3 +598,11 @@ class SpinWheelConfigRead(SpinWheelConfigBase):
     model_config = {
         "from_attributes": True
     }
+
+# =========================
+# Countdown Schemas
+# =========================
+class CountdownResponse(BaseModel):
+    task_reset_seconds: int
+    intern_expiry_seconds: Optional[int] = None
+    is_intern: bool = False

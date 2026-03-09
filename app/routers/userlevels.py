@@ -95,6 +95,7 @@ async def buy_level(request: BuyLevelRequest, current_user: User = Depends(get_c
         daily_income=level.daily_income,
         monthly_income=level.monthly_income,
         annual_income=level.annual_income,
+        created_at=datetime.utcnow()
     )
     db.add(user_level)
 
@@ -181,6 +182,7 @@ async def upgrade_level(request: BuyLevelRequest, current_user: User = Depends(g
     current_level.daily_income = level.daily_income
     current_level.monthly_income = level.monthly_income
     current_level.annual_income = level.annual_income
+    current_level.created_at = datetime.utcnow()
 
     db.add(wallet)
     await db.commit()

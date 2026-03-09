@@ -1,82 +1,77 @@
-# import asyncio
-# from apscheduler.schedulers.asyncio import AsyncIOScheduler
-# from sqlalchemy.ext.asyncio import AsyncSession
-# from sqlalchemy import update
-# from datetime import datetime
-# import pytz
-
-# from app.database.database import get_async_db
-# from app.models.models import UserTask
-
-# # Kenya timezone
-# KENYA_TZ = pytz.timezone("Africa/Nairobi")
-
-
-# async def mark_all_tasks_completed():
-#     """
-#     Mark all user tasks as completed.
-#     """
-#     async for session in get_async_db():  # Use async generator for your session
-#         try:
-#             await session.execute(
-#                 update(UserTask)
-#                 .where(UserTask.completed == True)
-#                 .values(completed=False)
-#             )
-#             await session.commit()
-#             print(f"[{datetime.now(KENYA_TZ)}] All user tasks marked as incomplete.")
-#         except Exception as e:
-#             await session.rollback()
-#             print(f"Error marking tasks completed: {e}")
-
-
-# def start_task_scheduler():
-#     """
-#     Initialize and start the async scheduler.
-#     """
-#     scheduler = AsyncIOScheduler(timezone=KENYA_TZ)
-
-#     # ✅ IMPORTANT: Pass the async function directly, do NOT wrap in create_task
-#     scheduler.add_job(mark_all_tasks_completed, 'interval', seconds=5)
-
-#     scheduler.start()
-#     print("Task completion scheduler started (running every 5 seconds for testing).")
-
-
 
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update
-from datetime import datetime
+from sqlalchemy import update, delete, select
+from datetime import datetime, timedelta
 import pytz
 
 from app.database.database import get_async_db
-from app.models.models import UserTask
+from app.models.models import UserTask, UserLevel, UserTaskCompleted, UserTaskPending
 
 # Kenya timezone
 KENYA_TZ = pytz.timezone("Africa/Nairobi")
 
 
-async def mark_all_tasks_completed():
+async def reset_daily_tasks():
     """
-    Marks all completed tasks as incomplete.
+    Marks all completed tasks as incomplete and clears history for the new day.
+    Runs daily at midnight Kenya time.
     """
     try:
-        async for session in get_async_db():  # Use async generator for session
+        async for session in get_async_db():
+            # 1. Reset completion status in UserTask
             result = await session.execute(
                 update(UserTask)
-                .where(UserTask.completed == True)  # completed → incomplete
+                .where(UserTask.completed == True)
                 .values(completed=False)
             )
+            
+            # 2. Optional: Clear daily history if needed (UserTaskCompleted/Pending)
+            # For this system, we keep them but the 'completed' flag in UserTask 
+            # is what controls if the user can do the task again today.
+            
             await session.commit()
             print(
-                f"[{datetime.now(KENYA_TZ)}] "
-                f"{result.rowcount} completed tasks marked as incomplete."
+                f"[{datetime.now(KENYA_TZ)}] Daily Reset: "
+                f"{result.rowcount} tasks reset for the new day."
             )
     except Exception as e:
-        await session.rollback()
-        print(f"[{datetime.now(KENYA_TZ)}] Error updating tasks: {e}")
+        print(f"[{datetime.now(KENYA_TZ)}] Error in daily reset: {e}")
+
+
+async def expire_intern_levels():
+    """
+    Expires 'Intern' levels after 3 days.
+    """
+    try:
+        async for session in get_async_db():
+            expiry_time = datetime.utcnow() - timedelta(days=3)
+            
+            # Find intern levels that are older than 3 days
+            result = await session.execute(
+                select(UserLevel)
+                .filter(UserLevel.name.ilike("intern"))
+                .filter(UserLevel.created_at <= expiry_time)
+            )
+            expired_levels = result.scalars().all()
+            
+            if expired_levels:
+                count = len(expired_levels)
+                for level in expired_levels:
+                    # Remove associated tasks for this user
+                    # Note: We filter by user_id. Usually an intern only has intern tasks.
+                    await session.execute(
+                        delete(UserTask)
+                        .where(UserTask.user_id == level.user_id)
+                    )
+                    # Remove the level
+                    await session.delete(level)
+                
+                await session.commit()
+                print(f"[{datetime.now(KENYA_TZ)}] Level Expiry: {count} intern levels expired.")
+    except Exception as e:
+        print(f"[{datetime.now(KENYA_TZ)}] Error in level expiry: {e}")
 
 
 def start_task_scheduler():
@@ -85,14 +80,21 @@ def start_task_scheduler():
     """
     scheduler = AsyncIOScheduler(timezone=KENYA_TZ)
 
-    # ✅ Schedule the job to run daily at 12:00 AM Kenya time
+    # 1. Schedule Task Reset at Midnight EAT
     scheduler.add_job(
-        mark_all_tasks_completed,
+        reset_daily_tasks,
         trigger='cron',
         hour=0,
         minute=0,
         second=0
     )
 
+    # 2. Schedule Intern Level Expiry (Check every hour)
+    scheduler.add_job(
+        expire_intern_levels,
+        trigger='interval',
+        hours=1
+    )
+
     scheduler.start()
-    print(f"[{datetime.now(KENYA_TZ)}] Task completion scheduler started (runs daily at 12:00 AM).")
+    print(f"[{datetime.now(KENYA_TZ)}] Scheduler started: Daily Reset (00:00 EAT) & Intern Expiry (Hourly check).")
