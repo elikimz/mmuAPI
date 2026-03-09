@@ -47,6 +47,6 @@ def start_scheduler():
     Starts APScheduler to run the wealth fund updates every 5 hours (testing)
     """
     # Run every 5 hours for testing
-    scheduler.add_job(run_update_tasks, 'interval', hours=5)
+    scheduler.add_job(run_update_tasks, 'interval', hours=5)  # 5 hours = 18000 seconds
     scheduler.start()
     print("✅ Wealth fund scheduler started (testing every 5 hours)")
