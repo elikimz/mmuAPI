@@ -1,7 +1,6 @@
 
 
 
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -24,7 +23,8 @@ async def apply_referral_bonus(db: AsyncSession, user_id: int, bonus_amount: flo
     wallet_result = await db.execute(select(Wallet).filter(Wallet.user_id == user_id))
     wallet = wallet_result.scalar_one_or_none()
     if not wallet:
-        raise HTTPException(status_code=404, detail="User wallet not found")
+        # We don't want to crash the whole purchase if a referrer's wallet is missing
+        return
 
     wallet.income += bonus_amount
 
@@ -36,7 +36,6 @@ async def apply_referral_bonus(db: AsyncSession, user_id: int, bonus_amount: flo
     ))
 
     db.add(wallet)
-    await db.commit()
 
 
 # -------------------------
@@ -79,63 +78,63 @@ async def buy_level(request: BuyLevelRequest, current_user: User = Depends(get_c
     if wallet.balance < level.earnest_money:
         raise HTTPException(400, "Insufficient balance to buy level")
 
-    # Deduct purchase money
-    wallet.balance -= level.earnest_money
-    db.add(Transaction(user_id=current_user.id, type=TransactionType.LEVEL_PURCHASE.value, amount=level.earnest_money, created_at=datetime.utcnow()))
+    try:
+        # Deduct purchase money
+        wallet.balance -= level.earnest_money
+        db.add(Transaction(user_id=current_user.id, type=TransactionType.LEVEL_PURCHASE.value, amount=level.earnest_money, created_at=datetime.utcnow()))
 
-    # Create level
-    user_level = UserLevel(
-        user_id=current_user.id,
-        level_id=level.id,
-        name=level.name,
-        description=level.description,
-        earnest_money=level.earnest_money,
-        workload=level.workload,
-        salary=level.salary,
-        daily_income=level.daily_income,
-        monthly_income=level.monthly_income,
-        annual_income=level.annual_income,
-        created_at=datetime.utcnow()
-    )
-    db.add(user_level)
+        # Create level
+        user_level = UserLevel(
+            user_id=current_user.id,
+            level_id=level.id,
+            name=level.name,
+            description=level.description,
+            earnest_money=level.earnest_money,
+            workload=level.workload,
+            salary=level.salary,
+            daily_income=level.daily_income,
+            monthly_income=level.monthly_income,
+            annual_income=level.annual_income,
+            created_at=datetime.utcnow()
+        )
+        db.add(user_level)
 
-    # Assign tasks
-    tasks = (await db.execute(select(Task).filter(Task.level_id == level.id))).scalars().all()
-    for t in tasks:
-        db.add(UserTask(user_id=current_user.id, task_id=t.id, video_url=t.video_url, completed=False))
+        # Assign tasks
+        tasks = (await db.execute(select(Task).filter(Task.level_id == level.id))).scalars().all()
+        for t in tasks:
+            db.add(UserTask(user_id=current_user.id, task_id=t.id, video_url=t.video_url, completed=False))
 
-    db.add(wallet)
-    await db.commit()
-    await db.refresh(user_level)
+        db.add(wallet)
+        
+        # =========================
+        # REFERRAL BONUS (FIXED)
+        # =========================
+        if level.earnest_money > 0:   # 🚨 only paid levels generate bonus
+            referrals = (await db.execute(select(Referral).where(Referral.referred_id == current_user.id))).scalars().all()
 
-    # =========================
-    # REFERRAL BONUS (FIXED)
-    # =========================
-    if level.earnest_money > 0:   # 🚨 only paid levels generate bonus
+            for ref in referrals:
+                referrer_level = (await db.execute(select(UserLevel).where(UserLevel.user_id == ref.referrer_id))).scalar_one_or_none()
+                if not referrer_level:
+                    continue
 
-        referrals = (await db.execute(select(Referral).where(Referral.referred_id == current_user.id))).scalars().all()
+                bonus_base = min(referrer_level.earnest_money, level.earnest_money)
+                if bonus_base <= 0:
+                    continue
 
-        for ref in referrals:
-            referrer_level = (await db.execute(select(UserLevel).where(UserLevel.user_id == ref.referrer_id))).scalar_one_or_none()
-            if not referrer_level:
-                continue
+                bonus_amount = round(bonus_base * BONUS_PERCENTAGES.get(ref.level, 0), 2)
+                await apply_referral_bonus(db, ref.referrer_id, bonus_amount)
 
-            bonus_base = min(referrer_level.earnest_money, level.earnest_money)
-
-            if bonus_base <= 0:
-                continue
-
-            bonus_amount = round(bonus_base * BONUS_PERCENTAGES.get(ref.level, 0), 2)
-
-            await apply_referral_bonus(db, ref.referrer_id, bonus_amount)
-
-            ref.is_active = True
-            ref.bonus_amount = bonus_amount
-            db.add(ref)
+                ref.is_active = True
+                ref.bonus_amount = bonus_amount
+                db.add(ref)
 
         await db.commit()
+        await db.refresh(user_level)
+        return user_level
 
-    return user_level
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(500, f"An error occurred during purchase: {str(e)}")
 
 
 # ============================================================
@@ -165,53 +164,54 @@ async def upgrade_level(request: BuyLevelRequest, current_user: User = Depends(g
     if wallet.balance < difference:
         raise HTTPException(400, "Insufficient balance")
 
-    old_level_price = current_level.earnest_money
+    try:
+        old_level_price = current_level.earnest_money
 
-    wallet.balance -= difference
-    wallet.income += old_level_price
+        wallet.balance -= difference
+        wallet.income += old_level_price
 
-    db.add(Transaction(user_id=current_user.id, type=TransactionType.LEVEL_UPGRADE.value, amount=difference, created_at=datetime.utcnow()))
+        db.add(Transaction(user_id=current_user.id, type=TransactionType.LEVEL_UPGRADE.value, amount=difference, created_at=datetime.utcnow()))
 
-    # Update level
-    current_level.level_id = level.id
-    current_level.name = level.name
-    current_level.description = level.description
-    current_level.earnest_money = level.earnest_money
-    current_level.workload = level.workload
-    current_level.salary = level.salary
-    current_level.daily_income = level.daily_income
-    current_level.monthly_income = level.monthly_income
-    current_level.annual_income = level.annual_income
-    current_level.created_at = datetime.utcnow()
+        # Update level
+        current_level.level_id = level.id
+        current_level.name = level.name
+        current_level.description = level.description
+        current_level.earnest_money = level.earnest_money
+        current_level.workload = level.workload
+        current_level.salary = level.salary
+        current_level.daily_income = level.daily_income
+        current_level.monthly_income = level.monthly_income
+        current_level.annual_income = level.annual_income
+        current_level.created_at = datetime.utcnow()
 
-    db.add(wallet)
-    await db.commit()
-    await db.refresh(current_level)
+        db.add(wallet)
 
-    # =========================
-    # REFERRAL BONUS ON FIRST PAID UPGRADE
-    # =========================
-    if old_level_price == 0 and level.earnest_money > 0:
+        # =========================
+        # REFERRAL BONUS ON FIRST PAID UPGRADE
+        # =========================
+        if old_level_price == 0 and level.earnest_money > 0:
+            referrals = (await db.execute(select(Referral).where(Referral.referred_id == current_user.id))).scalars().all()
 
-        referrals = (await db.execute(select(Referral).where(Referral.referred_id == current_user.id))).scalars().all()
+            for ref in referrals:
+                referrer_level = (await db.execute(select(UserLevel).where(UserLevel.user_id == ref.referrer_id))).scalar_one_or_none()
+                if not referrer_level:
+                    continue
 
-        for ref in referrals:
-            referrer_level = (await db.execute(select(UserLevel).where(UserLevel.user_id == ref.referrer_id))).scalar_one_or_none()
-            if not referrer_level:
-                continue
+                bonus_base = min(referrer_level.earnest_money, level.earnest_money)
+                if bonus_base <= 0:
+                    continue
 
-            bonus_base = min(referrer_level.earnest_money, level.earnest_money)
-            if bonus_base <= 0:
-                continue
+                bonus_amount = round(bonus_base * BONUS_PERCENTAGES.get(ref.level, 0), 2)
+                await apply_referral_bonus(db, ref.referrer_id, bonus_amount)
 
-            bonus_amount = round(bonus_base * BONUS_PERCENTAGES.get(ref.level, 0), 2)
-
-            await apply_referral_bonus(db, ref.referrer_id, bonus_amount)
-
-            ref.is_active = True
-            ref.bonus_amount = bonus_amount
-            db.add(ref)
+                ref.is_active = True
+                ref.bonus_amount = bonus_amount
+                db.add(ref)
 
         await db.commit()
+        await db.refresh(current_level)
+        return current_level
 
-    return current_level
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(500, f"An error occurred during upgrade: {str(e)}")
