@@ -129,14 +129,15 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
                 bonus_amount=0.0
             )
             db.add(referral_record)
-            await db.commit()
-
+            
             # Move to next level referrer (parent of current_referrer)
             if current_referrer.referred_by is None:
-                break
-
-            result = await db.execute(select(User).where(User.id == current_referrer.referred_by))
-            current_referrer = result.scalar_one_or_none()
+                current_referrer = None
+            else:
+                result = await db.execute(select(User).where(User.id == current_referrer.referred_by))
+                current_referrer = result.scalar_one_or_none()
+        
+        await db.commit()
 
     return {"message": "User registered successfully."}
 
