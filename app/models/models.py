@@ -205,7 +205,7 @@ class UserLevel(Base):
     monthly_income = Column(Float, default=0.0)
     annual_income = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
-    user = relationship("User", back_populates="levels"))
+    user = relationship("User", back_populates="levels")
     level = relationship("Level", back_populates="user_levels")
 
 

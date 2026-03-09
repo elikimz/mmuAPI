@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import pytz
 
 from app.database.database import get_async_db
-from app.models.models import UserTask, UserLevel, UserTaskCompleted, UserTaskPending
+# Models are imported inside functions to prevent circular dependency
 
 # Kenya timezone
 KENYA_TZ = pytz.timezone("Africa/Nairobi")
@@ -18,6 +18,7 @@ async def reset_daily_tasks():
     Marks all completed tasks as incomplete and clears history for the new day.
     Runs daily at midnight Kenya time.
     """
+    from app.models.models import UserTask
     try:
         async for session in get_async_db():
             # 1. Reset completion status in UserTask
@@ -44,6 +45,7 @@ async def expire_intern_levels():
     """
     Expires 'Intern' levels after 3 days from purchase.
     """
+    from app.models.models import UserTask, UserLevel
     try:
         async for session in get_async_db():
             # Model created_at is UTC
