@@ -126,10 +126,11 @@ async def get_user_profile(
             "wealthfunds": [
                 {
                     "id": int(wf.id) if hasattr(wf, 'id') else 0,
+                    "image": str(wf.image) if hasattr(wf, 'image') and wf.image else None,
                     "name": str(wf.name) if hasattr(wf, 'name') else "Unknown",
-                    "amount": float(wf.amount) if hasattr(wf, 'amount') else 0.0,
-                    "total_profit": float(wf.total_profit) if hasattr(wf, 'total_profit') else 0.0,
-                    "status": str(wf.status) if hasattr(wf, 'status') else "inactive",
+                    "profit_percent": float(wf.profit_percent) if hasattr(wf, 'profit_percent') else 0.0,
+                    "duration_days": int(wf.duration_days) if hasattr(wf, 'duration_days') else 0,
+                    "daily_interest": float(wf.daily_interest) if hasattr(wf, 'daily_interest') else 0.0,
                 }
                 for wf in wealthfunds
             ] if wealthfunds else [],
