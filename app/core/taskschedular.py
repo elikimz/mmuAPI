@@ -18,7 +18,7 @@ async def reset_daily_tasks():
     Marks all completed tasks as incomplete and clears history for the new day.
     Runs daily at midnight Kenya time.
     """
-    from app.models.models import UserTask
+    from app.models.models import UserTask, UserTaskPending, UserTaskCompleted, UserLevel, Task
     try:
         async for session in get_async_db():
             # 1. Reset completion status in UserTask
@@ -32,10 +32,37 @@ async def reset_daily_tasks():
             await session.execute(delete(UserTaskPending))
             await session.execute(delete(UserTaskCompleted))
             
+            # 3. Ensure all users have tasks assigned for their current levels
+            # This handles cases where tasks might have been deleted or levels changed
+            user_levels_result = await session.execute(select(UserLevel))
+            user_levels = user_levels_result.scalars().all()
+            
+            for ul in user_levels:
+                # Get all tasks for this level
+                tasks_result = await session.execute(select(Task).filter(Task.level_id == ul.level_id))
+                tasks = tasks_result.scalars().all()
+                
+                for t in tasks:
+                    # Check if user already has this task assigned
+                    existing_task_result = await session.execute(
+                        select(UserTask).filter(
+                            UserTask.user_id == ul.user_id,
+                            UserTask.task_id == t.id
+                        )
+                    )
+                    if not existing_task_result.scalar_one_or_none():
+                        session.add(UserTask(
+                            user_id=ul.user_id,
+                            task_id=t.id,
+                            video_url=t.video_url,
+                            completed=False
+                        ))
+            
             await session.commit()
             print(
                 f"[{datetime.now(KENYA_TZ)}] Daily Reset: "
-                f"{result.rowcount} tasks reset for the new day. UserTaskPending and UserTaskCompleted cleared."
+                f"{result.rowcount} tasks reset for the new day. UserTaskPending and UserTaskCompleted cleared. "
+                f"Task reassignment check completed."
             )
     except Exception as e:
         print(f"[{datetime.now(KENYA_TZ)}] Error in daily reset: {e}")
