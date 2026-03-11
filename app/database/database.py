@@ -21,10 +21,15 @@ ssl_context.verify_mode = ssl.CERT_NONE
 
 # --- Async Engine ---
 # Added pooling settings to prevent "connection is closed" errors on Azure
+# Determine if SSL is needed (Postgres usually needs it, SQLite does not)
+connect_args = {}
+if "sqlite" not in DATABASE_URL:
+    connect_args["ssl"] = ssl_context
+
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,  # Set to False in production
-    connect_args={"ssl": ssl_context},
+    connect_args=connect_args,
     pool_size=20,          # Max number of persistent connections
     max_overflow=10,       # Max connections allowed beyond pool_size
     pool_timeout=30,       # Seconds to wait before giving up on getting a connection
