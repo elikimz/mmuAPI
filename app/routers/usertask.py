@@ -400,3 +400,62 @@ async def get_all_user_tasks(
             tasks_with_reward_and_level.append(task_data)
 
     return tasks_with_reward_and_level
+
+
+# -------------------------
+# ADMIN: All pending tasks
+# -------------------------
+@router.get("/admin/all/pending", response_model=List[UserTaskPendingResponse])
+async def get_all_pending_tasks(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(
+        select(UserTaskPending)
+        .options(joinedload(UserTaskPending.task).joinedload(Task.level))
+    )
+    pending_tasks = result.scalars().all()
+
+    return [
+        {
+            "id": p.id,
+            "user_id": p.user_id,
+            "task_id": p.task_id,
+            "video_url": p.video_url,
+            "pending_until": p.pending_until,
+            "created_at": p.created_at,
+            "reward": p.task.reward,
+            "level_name": p.task.level.name,
+        }
+        for p in pending_tasks
+        if p.task and p.task.level
+    ]
+
+
+# -------------------------
+# ADMIN: All completed tasks
+# -------------------------
+@router.get("/admin/all/completed", response_model=List[UserTaskCompletedResponse])
+async def get_all_completed_tasks(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(
+        select(UserTaskCompleted)
+        .options(joinedload(UserTaskCompleted.task).joinedload(Task.level))
+    )
+    completed_tasks = result.scalars().all()
+
+    return [
+        {
+            "id": c.id,
+            "user_id": c.user_id,
+            "task_id": c.task_id,
+            "video_url": c.video_url,
+            "completed_at": c.completed_at,
+            "reward": c.task.reward,
+            "level_name": c.task.level.name,
+        }
+        for c in completed_tasks
+        if c.task and c.task.level
+    ]

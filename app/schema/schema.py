@@ -181,28 +181,30 @@ class WithdrawalResponse(BaseModel):
 # -------------------------
 class LevelCreate(BaseModel):
     name: str
-    description: Optional[str] = None 
+    description: Optional[str] = None
     earnest_money: float = 0.0
     workload: float = 0.0
     salary: float = 0.0
     daily_income: float = 0.0
     monthly_income: float = 0.0
     annual_income: float = 0.0
-    locked: Optional[bool] = False  # 👈 new field, default unlocked
+    locked: Optional[bool] = False
+    expiry_days: Optional[int] = None  # None = no expiry; >0 = expires after N days
 
 # -------------------------
 # UPDATE
 # -------------------------
 class LevelUpdate(BaseModel):
     name: Optional[str] = None
-    description: Optional[str] = None 
+    description: Optional[str] = None
     earnest_money: Optional[float] = None
     workload: Optional[float] = None
     salary: Optional[float] = None
     daily_income: Optional[float] = None
     monthly_income: Optional[float] = None
     annual_income: Optional[float] = None
-    locked: Optional[bool] = None  # 👈 new field, can lock/unlock
+    locked: Optional[bool] = None
+    expiry_days: Optional[int] = None  # None = no expiry; >0 = expires after N days
 
 # -------------------------
 # RESPONSE
@@ -210,18 +212,19 @@ class LevelUpdate(BaseModel):
 class FullLevelResponse(BaseModel):
     id: int
     name: str
-    description: Optional[str] = None 
+    description: Optional[str] = None
     earnest_money: float
     workload: float
     salary: float
     daily_income: float
     monthly_income: float
     annual_income: float
-    task_count: int   # 👈 dynamically calculated
-    locked: bool      # 👈 new field in response
+    task_count: int
+    locked: bool
+    expiry_days: Optional[int] = None  # None = no expiry; >0 = expires after N days
 
     model_config = {
-        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+        "from_attributes": True
     }
 
 
@@ -284,9 +287,11 @@ class UserLevelResponse(BaseModel):
     daily_income: float
     monthly_income: float
     annual_income: float
+    created_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None  # When this level expires for the user
 
     model_config = {
-        "from_attributes": True  # ✅ Required for SQLAlchemy v2 async
+        "from_attributes": True
     }
 
 # -------------------------
@@ -604,5 +609,10 @@ class SpinWheelConfigRead(SpinWheelConfigBase):
 # =========================
 class CountdownResponse(BaseModel):
     task_reset_seconds: int
+    # Legacy fields (kept for backward compatibility)
     intern_expiry_seconds: Optional[int] = None
     is_intern: bool = False
+    # Generic level expiry fields
+    level_expiry_seconds: Optional[int] = None  # Seconds until current level expires (None = no expiry)
+    level_name: Optional[str] = None             # Name of the user's current level
+    has_expiry: bool = False                      # True if the current level has an expiry

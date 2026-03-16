@@ -1,16 +1,13 @@
-
-
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
-from typing import List, Optional
+from typing import List
 
 from app.database.database import get_async_db
 from app.models.models import Level, Task, User
 from app.routers.auth import get_current_admin
-from app.schema.schema import FullLevelResponse, LevelCreate, LevelResponse, LevelUpdate
+from app.schema.schema import FullLevelResponse, LevelCreate, LevelUpdate
 
 router = APIRouter(prefix="/levels", tags=["Levels"])
 
@@ -34,7 +31,7 @@ async def get_all_levels(db: AsyncSession = Depends(get_async_db)):
         levels.append({
             "id": level.id,
             "name": level.name,
-            "description": level.description,  # ✅ include description
+            "description": level.description,
             "earnest_money": level.earnest_money,
             "workload": level.workload,
             "salary": level.salary,
@@ -42,7 +39,8 @@ async def get_all_levels(db: AsyncSession = Depends(get_async_db)):
             "monthly_income": level.monthly_income,
             "annual_income": level.annual_income,
             "task_count": task_count,
-            "locked": bool(level.locked)
+            "locked": bool(level.locked),
+            "expiry_days": level.expiry_days,
         })
 
     return levels
@@ -51,7 +49,7 @@ async def get_all_levels(db: AsyncSession = Depends(get_async_db)):
 # -------------------------
 # ADMIN: Create level
 # -------------------------
-@router.post("/", response_model=LevelResponse)
+@router.post("/", response_model=FullLevelResponse)
 async def create_level(
     level: LevelCreate,
     admin: User = Depends(get_current_admin),
@@ -59,18 +57,19 @@ async def create_level(
 ):
     existing = await db.execute(select(Level).filter(Level.name == level.name))
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Level already exists")
+        raise HTTPException(status_code=400, detail="Level with this name already exists")
 
     new_level = Level(
         name=level.name,
-        description=level.description,  # ✅ new field
+        description=level.description,
         earnest_money=level.earnest_money,
         workload=level.workload,
         salary=level.salary,
         daily_income=level.daily_income,
         monthly_income=level.monthly_income,
         annual_income=level.annual_income,
-        locked=level.locked if hasattr(level, "locked") else False
+        locked=level.locked if level.locked is not None else False,
+        expiry_days=level.expiry_days,
     )
 
     db.add(new_level)
@@ -80,7 +79,7 @@ async def create_level(
     return {
         "id": new_level.id,
         "name": new_level.name,
-        "description": new_level.description,  # ✅ include description
+        "description": new_level.description,
         "earnest_money": new_level.earnest_money,
         "workload": new_level.workload,
         "salary": new_level.salary,
@@ -88,14 +87,15 @@ async def create_level(
         "monthly_income": new_level.monthly_income,
         "annual_income": new_level.annual_income,
         "task_count": 0,
-        "locked": new_level.locked
+        "locked": bool(new_level.locked),
+        "expiry_days": new_level.expiry_days,
     }
 
 
 # -------------------------
-# ADMIN: Update level (lock/unlock included)
+# ADMIN: Update level (lock/unlock, expiry_days included)
 # -------------------------
-@router.patch("/{level_id}", response_model=LevelResponse)
+@router.patch("/{level_id}", response_model=FullLevelResponse)
 async def update_level(
     level_id: int,
     level_update: LevelUpdate,
@@ -109,7 +109,7 @@ async def update_level(
         raise HTTPException(status_code=404, detail="Level not found")
 
     for field, value in level_update.dict(exclude_unset=True).items():
-        setattr(level, field, value)  # ✅ updates description if provided
+        setattr(level, field, value)
 
     db.add(level)
     await db.commit()
@@ -122,15 +122,16 @@ async def update_level(
     return {
         "id": level.id,
         "name": level.name,
-        "description": level.description,  # ✅ include description
+        "description": level.description,
         "earnest_money": level.earnest_money,
         "workload": level.workload,
         "salary": level.salary,
         "daily_income": level.daily_income,
         "monthly_income": level.monthly_income,
         "annual_income": level.annual_income,
-        "task_count": task_count,
-        "locked": level.locked
+        "task_count": task_count or 0,
+        "locked": bool(level.locked),
+        "expiry_days": level.expiry_days,
     }
 
 

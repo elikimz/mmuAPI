@@ -117,6 +117,7 @@ class Level(Base):
     monthly_income = Column(Float, default=0.0)
     annual_income = Column(Float, default=0.0)
     locked = Column(Boolean, default=False)
+    expiry_days = Column(Integer, nullable=True)  # None = no expiry; >0 = expires after N days
 
     user_levels = relationship("UserLevel", back_populates="level", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="level", cascade="all, delete-orphan")
@@ -205,6 +206,7 @@ class UserLevel(Base):
     monthly_income = Column(Float, default=0.0)
     annual_income = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)  # Computed from level.expiry_days at purchase/upgrade time
     user = relationship("User", back_populates="levels")
     level = relationship("Level", back_populates="user_levels")
 
