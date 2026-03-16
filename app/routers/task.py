@@ -38,7 +38,7 @@ async def get_tasks_by_level(
 # -------------------------
 @router.get("/", response_model=List[TaskResponse])
 async def get_all_tasks(
-    admin: User = Depends(get_current_admin),
+    # admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_async_db),
 ):
     result = await db.execute(select(Task))
