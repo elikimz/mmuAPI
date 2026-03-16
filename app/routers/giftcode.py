@@ -422,5 +422,5 @@ async def get_my_giftcode_history(user: User = Depends(get_current_user), db: As
     )
     redemptions = result.scalars().all()
     if not redemptions:
-        raise HTTPException(404, "No gift code redemption history found")
+        return []
     return [r.gift_code for r in redemptions]
