@@ -127,6 +127,21 @@ async def update_task(
         setattr(task, field, value)
 
     db.add(task)
+
+    # 🔥 If video_url was updated, propagate to all existing UserTask records
+    # so that users already assigned this task see the corrected video
+    if task_update.video_url is not None:
+        await db.execute(
+            UserTask.__table__.update()
+            .where(UserTask.task_id == task_id)
+            .values(video_url=task_update.video_url)
+        )
+        await db.execute(
+            UserTaskPending.__table__.update()
+            .where(UserTaskPending.task_id == task_id)
+            .values(video_url=task_update.video_url)
+        )
+
     await db.commit()
     await db.refresh(task)
     return task
