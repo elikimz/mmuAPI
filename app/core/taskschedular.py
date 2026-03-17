@@ -1,4 +1,3 @@
-
 """
 Task Scheduler — runs two recurring jobs:
 
@@ -19,56 +18,94 @@ KENYA_TZ = pytz.timezone("Africa/Nairobi")
 async def reset_daily_tasks():
     """
     Runs daily at midnight EAT.
-    - Resets all UserTask.completed flags to False
-    - Clears UserTaskPending and UserTaskCompleted tables
-    - Ensures every active UserLevel has all its tasks assigned
+
+    For each user that has an active UserLevel:
+      1. Identify which task IDs belong to the user's CURRENT level.
+      2. Delete any UserTask records for that user whose task does NOT belong
+         to the current level (stale tasks from a previous level).
+      3. Reset completion flags on remaining tasks.
+      4. Clear UserTaskPending and UserTaskCompleted tables.
+      5. Ensure every task for the current level is assigned (idempotent).
+
+    This guarantees that even if a stale task somehow survived an upgrade,
+    the nightly reset will clean it up.
     """
     from app.models.models import UserTask, UserTaskPending, UserTaskCompleted, UserLevel, Task
     try:
         async for session in get_async_db():
-            # 1. Reset completion flags
-            reset_result = await session.execute(
-                update(UserTask)
-                .where(UserTask.completed == True)
-                .values(completed=False)
-            )
-
-            # 2. Clear pending and completed history
+            # 1. Clear pending and completed history for the new day
             await session.execute(delete(UserTaskPending))
             await session.execute(delete(UserTaskCompleted))
 
-            # 3. Ensure every user level has all its tasks assigned
+            # 2. Process each active user level
             user_levels_result = await session.execute(select(UserLevel))
             user_levels = user_levels_result.scalars().all()
 
+            reset_count = 0
+            purged_count = 0
             new_tasks_count = 0
-            for ul in user_levels:
-                tasks_result = await session.execute(
-                    select(Task).filter(Task.level_id == ul.level_id)
-                )
-                tasks = tasks_result.scalars().all()
 
-                for t in tasks:
+            for ul in user_levels:
+                # Fetch the valid task IDs for this user's current level
+                valid_tasks_result = await session.execute(
+                    select(Task.id).filter(Task.level_id == ul.level_id)
+                )
+                valid_task_ids = [row[0] for row in valid_tasks_result.fetchall()]
+
+                if not valid_task_ids:
+                    # Level has no tasks — remove any orphaned user tasks
+                    purge_result = await session.execute(
+                        delete(UserTask).where(UserTask.user_id == ul.user_id)
+                    )
+                    purged_count += purge_result.rowcount
+                    continue
+
+                # 2a. Remove stale tasks (tasks NOT belonging to the current level)
+                purge_result = await session.execute(
+                    delete(UserTask).where(
+                        UserTask.user_id == ul.user_id,
+                        UserTask.task_id.notin_(valid_task_ids),
+                    )
+                )
+                purged_count += purge_result.rowcount
+
+                # 2b. Reset completion flags on valid tasks
+                reset_result = await session.execute(
+                    update(UserTask)
+                    .where(
+                        UserTask.user_id == ul.user_id,
+                        UserTask.task_id.in_(valid_task_ids),
+                        UserTask.completed == True,
+                    )
+                    .values(completed=False)
+                )
+                reset_count += reset_result.rowcount
+
+                # 2c. Assign any missing tasks for the current level (idempotent)
+                for task_id in valid_task_ids:
                     existing = await session.execute(
                         select(UserTask).filter(
                             UserTask.user_id == ul.user_id,
-                            UserTask.task_id == t.id
+                            UserTask.task_id == task_id,
                         )
                     )
                     if not existing.scalar_one_or_none():
-                        session.add(UserTask(
-                            user_id=ul.user_id,
-                            task_id=t.id,
-                            video_url=t.video_url,
-                            completed=False
-                        ))
-                        new_tasks_count += 1
+                        # Fetch full task to get video_url
+                        task_obj = await session.get(Task, task_id)
+                        if task_obj:
+                            session.add(UserTask(
+                                user_id=ul.user_id,
+                                task_id=task_id,
+                                video_url=task_obj.video_url,
+                                completed=False,
+                            ))
+                            new_tasks_count += 1
 
             await session.commit()
             print(
                 f"[{datetime.now(KENYA_TZ)}] Daily Reset: "
-                f"{reset_result.rowcount} tasks reset. "
-                f"Pending/Completed cleared. "
+                f"{reset_count} tasks reset, "
+                f"{purged_count} stale tasks purged, "
                 f"{new_tasks_count} new task assignments created."
             )
     except Exception as e:
@@ -87,7 +124,7 @@ async def expire_user_levels():
     Legacy fallback: if a level is named 'intern' and has no expires_at,
     it falls back to the original 3-day rule based on created_at.
     """
-    from app.models.models import UserTask, UserLevel
+    from app.models.models import UserTask, UserTaskPending, UserTaskCompleted, UserLevel
     try:
         async for session in get_async_db():
             now_utc = datetime.utcnow()
@@ -116,6 +153,13 @@ async def expire_user_levels():
 
             if all_expired:
                 for level in all_expired:
+                    # Remove all task records for this user on expiry
+                    await session.execute(
+                        delete(UserTaskPending).where(UserTaskPending.user_id == level.user_id)
+                    )
+                    await session.execute(
+                        delete(UserTaskCompleted).where(UserTaskCompleted.user_id == level.user_id)
+                    )
                     await session.execute(
                         delete(UserTask).where(UserTask.user_id == level.user_id)
                     )

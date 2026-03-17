@@ -1,11 +1,24 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
 from datetime import datetime, timedelta
 
 from app.database.database import get_async_db
-from app.models.models import Referral, User, UserLevel, Level, Wallet, Task, UserTask, Transaction, TransactionType
+from app.models.models import (
+    Referral,
+    User,
+    UserLevel,
+    Level,
+    Wallet,
+    Task,
+    UserTask,
+    UserTaskPending,
+    UserTaskCompleted,
+    Transaction,
+    TransactionType,
+)
 from app.routers.auth import get_current_user
 from app.schema.schema import BuyLevelRequest, UserLevelResponse, LevelInfoResponse
 from app.core.websocket_manager import manager
@@ -43,6 +56,51 @@ async def apply_referral_bonus(db: AsyncSession, user_id: int, bonus_amount: flo
         created_at=datetime.utcnow()
     ))
     db.add(wallet)
+
+
+# -------------------------
+# Helper: clear all task records for a user and assign tasks for a given level
+# This is the single source of truth for task assignment on level change.
+# Must be called within an active transaction.
+# -------------------------
+async def reset_user_tasks_for_level(db: AsyncSession, user_id: int, level_id: int):
+    """
+    Atomically removes ALL existing task records for the user (active, pending,
+    and completed) and assigns fresh tasks for the specified level.
+
+    This guarantees that a user can never hold tasks from more than one level
+    at any point in time.
+    """
+    # 1. Remove all pending tasks for the user
+    await db.execute(
+        delete(UserTaskPending).where(UserTaskPending.user_id == user_id)
+    )
+
+    # 2. Remove all completed tasks for the user
+    await db.execute(
+        delete(UserTaskCompleted).where(UserTaskCompleted.user_id == user_id)
+    )
+
+    # 3. Remove all active/assigned tasks for the user
+    await db.execute(
+        delete(UserTask).where(UserTask.user_id == user_id)
+    )
+
+    # 4. Assign all tasks belonging to the new level
+    tasks_result = await db.execute(
+        select(Task).filter(Task.level_id == level_id)
+    )
+    new_tasks = tasks_result.scalars().all()
+
+    for t in new_tasks:
+        db.add(UserTask(
+            user_id=user_id,
+            task_id=t.id,
+            video_url=t.video_url,
+            completed=False,
+        ))
+
+    return len(new_tasks)
 
 
 # -------------------------
@@ -126,15 +184,9 @@ async def buy_level(
         )
         db.add(user_level)
 
-        # Assign all tasks for this level to the user
-        tasks = (await db.execute(select(Task).filter(Task.level_id == level.id))).scalars().all()
-        for t in tasks:
-            db.add(UserTask(
-                user_id=current_user.id,
-                task_id=t.id,
-                video_url=t.video_url,
-                completed=False
-            ))
+        # Assign all tasks for this level to the user via the shared helper.
+        # This ensures buy and upgrade share the same task-assignment logic.
+        assigned_count = await reset_user_tasks_for_level(db, current_user.id, level.id)
 
         db.add(wallet)
 
@@ -165,7 +217,10 @@ async def buy_level(
 
         await db.commit()
         await db.refresh(user_level)
-        print(f"User {current_user.id} purchased level '{level.name}' (expires_at={expires_at}).")
+        print(
+            f"User {current_user.id} purchased level '{level.name}' "
+            f"({assigned_count} tasks assigned, expires_at={expires_at})."
+        )
 
         try:
             await cache.delete(f"user_profile_{current_user.id}")
@@ -226,6 +281,8 @@ async def upgrade_level(
         )
 
     try:
+        old_level_id = current_level.level_id
+        old_level_name = current_level.name
         old_level_price = current_level.earnest_money
         now = datetime.utcnow()
 
@@ -253,6 +310,18 @@ async def upgrade_level(
         current_level.annual_income = level.annual_income
         current_level.created_at = now
         current_level.expires_at = expires_at
+        db.add(current_level)
+
+        # ---------------------------------------------------------------
+        # FIX: Clear all tasks from the previous level and assign tasks
+        # for the new level within the same transaction.
+        #
+        # This guarantees:
+        #   1. No stale tasks from old_level_id remain in any task table.
+        #   2. All tasks for the new level.id are freshly assigned.
+        #   3. The operation is atomic — either all changes commit or none do.
+        # ---------------------------------------------------------------
+        assigned_count = await reset_user_tasks_for_level(db, current_user.id, level.id)
 
         db.add(wallet)
 
@@ -283,7 +352,12 @@ async def upgrade_level(
 
         await db.commit()
         await db.refresh(current_level)
-        print(f"User {current_user.id} upgraded to level '{level.name}' (expires_at={expires_at}).")
+        print(
+            f"User {current_user.id} upgraded from level '{old_level_name}' (id={old_level_id}) "
+            f"to '{level.name}' (id={level.id}). "
+            f"Old tasks purged, {assigned_count} new tasks assigned. "
+            f"expires_at={expires_at}."
+        )
 
         try:
             await cache.delete(f"user_profile_{current_user.id}")
