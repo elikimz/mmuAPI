@@ -22,6 +22,7 @@ Base = declarative_base()
 # ==========================
 # User
 # ==========================
+
 class User(Base):
     __tablename__ = "users"
 
