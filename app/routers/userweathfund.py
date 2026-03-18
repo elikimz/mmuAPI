@@ -37,24 +37,28 @@ async def update_daily_interest(db: AsyncSession):
         interest at 00:00 UTC the following day, and the scheduler running at any
         hour of that day will correctly credit it.
     """
-    now = datetime.utcnow()
-    today = now.date()
+    now_utc = datetime.utcnow()
+    # Kenya is UTC+3
+    kenya_offset = timedelta(hours=3)
+    now_kenya = now_utc + kenya_offset
+    today_kenya = now_kenya.date()
 
     result = await db.execute(
         select(UserWealthFund)
         .filter(UserWealthFund.status == "active")
-        .filter(UserWealthFund.end_date > now)
+        .filter(UserWealthFund.end_date > now_utc)
     )
     active_funds = result.scalars().all()
 
     updated_count = 0
     for fund in active_funds:
-        # Determine the last date on which interest was credited
-        last_update_dt = fund.last_interest_update or fund.start_date
-        last_update_date = last_update_dt.date()
+        # Determine the last date on which interest was credited (convert to Kenya time)
+        last_update_dt_utc = fund.last_interest_update or fund.start_date
+        last_update_dt_kenya = last_update_dt_utc + kenya_offset
+        last_update_date_kenya = last_update_dt_kenya.date()
 
-        # Number of full calendar days that have elapsed since last accrual
-        days_to_accrue = (today - last_update_date).days
+        # Number of full Kenya calendar days that have elapsed since last accrual
+        days_to_accrue = (today_kenya - last_update_date_kenya).days
 
         if days_to_accrue <= 0:
             # Already accrued today — skip
