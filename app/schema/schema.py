@@ -431,13 +431,9 @@ class UserWealthFundResponse(BaseModel):
 
     start_date: datetime
     end_date: datetime
+    last_interest_update: Optional[datetime] = None
     status: str
     created_at: datetime
-
-    @property
-    def final_amount(self) -> float:
-        """Principal + total profit — the amount credited to wallet on maturity."""
-        return round(self.amount + self.total_profit, 2)
 
     model_config = {
         "from_attributes": True  # ✅ Required for SQLAlchemy v2 async

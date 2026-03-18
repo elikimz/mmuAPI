@@ -245,6 +245,7 @@ class UserWealthFund(Base):
     today_interest = Column(Float, default=0.0)
     start_date = Column(DateTime, default=datetime.utcnow)
     end_date = Column(DateTime, nullable=False)
+    last_interest_update = Column(DateTime, nullable=True)
 
     status = Column(String, default="active")
     created_at = Column(DateTime, default=datetime.utcnow)

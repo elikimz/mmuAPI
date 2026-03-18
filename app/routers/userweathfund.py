@@ -21,30 +21,35 @@ router = APIRouter(prefix="/user-wealthfunds", tags=["User Wealth Funds"])
 # ─────────────────────────────────────────────────────────────────────────────
 async def update_daily_interest(db: AsyncSession):
     """
-    Runs on a schedule (every day / every minute in dev).
-    For each active fund that has NOT yet reached its end_date, we:
-      1. Calculate today's interest = (daily_interest% / 100) * principal
-      2. Overwrite today_interest (it represents the CURRENT day's gain)
-      3. Accumulate into total_profit
-    We deliberately do NOT credit the wallet here — that happens only at maturity.
+    Accrues daily interest for active funds that haven't matured.
+    Ensures interest is only added once per 24-hour period.
     """
     now = datetime.utcnow()
     result = await db.execute(
         select(UserWealthFund)
         .filter(UserWealthFund.status == "active")
-        .filter(UserWealthFund.end_date > now)   # strictly before maturity
+        .filter(UserWealthFund.end_date > now)
     )
     active_funds = result.scalars().all()
 
+    updated_count = 0
     for fund in active_funds:
-        # daily_interest is stored as a percentage value (e.g. 2.5 means 2.5%)
-        today_interest = round((fund.daily_interest / 100.0) * fund.amount, 6)
-        fund.today_interest = today_interest
-        fund.total_profit = round(fund.total_profit + today_interest, 6)
+        # Check if 24 hours have passed since last update (or since start_date)
+        last_update = fund.last_interest_update or fund.start_date
+        if (now - last_update) >= timedelta(days=1):
+            # Calculate daily interest (e.g., 2.5 means 2.5%)
+            daily_gain = round((fund.daily_interest / 100.0) * fund.amount, 6)
+            
+            fund.today_interest = daily_gain
+            fund.total_profit = round(fund.total_profit + daily_gain, 6)
+            fund.last_interest_update = now
+            updated_count += 1
+            
+            logger.info(f"Accrued KES {daily_gain} interest for fund {fund.id} (user {fund.user_id})")
 
-    if active_funds:
+    if updated_count > 0:
         await db.commit()
-        logger.info(f"Daily interest updated for {len(active_funds)} active fund(s).")
+        logger.info(f"Daily interest update cycle complete. {updated_count} fund(s) updated.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
