@@ -7,13 +7,21 @@ Runs two background tasks on a fixed interval:
                               credits the wallet, and records the income transaction.
 
 Production schedule: every 60 minutes (configurable via WEALTHFUND_SCHEDULER_INTERVAL_MINUTES).
-This ensures matured funds are processed within at most one hour of their end_date,
-without hammering the database.
+
+Fix (Startup Race Condition):
+  The original code used next_run_time=datetime.utcnow() which fires the job
+  immediately at startup, before the FastAPI application event loop and database
+  connection pool are fully initialised. This caused the first scheduler tick to
+  fail silently and could trigger complete_matured_funds multiple times if the
+  app restarted rapidly.
+
+  Fix: delay the first run by WEALTHFUND_SCHEDULER_STARTUP_DELAY_SECONDS (default 30s)
+  to ensure the app is fully ready before the first tick.
 """
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -24,8 +32,9 @@ logger = logging.getLogger("mmuAPI.scheduler")
 
 scheduler = AsyncIOScheduler()
 
-# Allow the interval to be tuned via environment variable (default: 60 minutes)
+# Allow the interval and startup delay to be tuned via environment variables
 _INTERVAL_MINUTES = int(os.getenv("WEALTHFUND_SCHEDULER_INTERVAL_MINUTES", "60"))
+_STARTUP_DELAY_SECONDS = int(os.getenv("WEALTHFUND_SCHEDULER_STARTUP_DELAY_SECONDS", "30"))
 
 
 async def run_wealthfund_tasks():
@@ -57,14 +66,16 @@ def start_scheduler():
     """
     Starts the APScheduler background scheduler.
     Runs every WEALTHFUND_SCHEDULER_INTERVAL_MINUTES minutes (default 60).
-    Also fires once immediately at startup so that any funds that matured
-    while the server was offline are settled right away.
+    First run is delayed by WEALTHFUND_SCHEDULER_STARTUP_DELAY_SECONDS (default 30s)
+    to avoid a race condition where the scheduler fires before the app is fully ready.
     """
+    first_run_time = datetime.utcnow() + timedelta(seconds=_STARTUP_DELAY_SECONDS)
+
     scheduler.add_job(
         run_wealthfund_tasks,
         trigger="interval",
         minutes=_INTERVAL_MINUTES,
-        next_run_time=datetime.utcnow(),   # fire immediately on startup
+        next_run_time=first_run_time,       # delayed startup — avoids race condition
         id="wealthfund_tasks",
         replace_existing=True,
         max_instances=1,                    # prevent overlapping runs
@@ -73,5 +84,5 @@ def start_scheduler():
     scheduler.start()
     logger.info(
         f"WealthFund scheduler started — interval: every {_INTERVAL_MINUTES} minute(s). "
-        f"First run: immediate."
+        f"First run in {_STARTUP_DELAY_SECONDS}s at {first_run_time.isoformat()} UTC."
     )
