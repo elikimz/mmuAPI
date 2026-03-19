@@ -276,10 +276,10 @@ async def upgrade_level(
         raise HTTPException(status_code=400, detail="You must upgrade to a higher-tier level")
 
     difference = level.earnest_money - current_level.earnest_money
-    if wallet.income < difference:
+    if wallet.balance < difference:
         raise HTTPException(
             status_code=400,
-            detail=f"Insufficient income balance. Required: {difference}, Available: {wallet.income}"
+            detail=f"Insufficient balance. Required: {difference}, Available: {wallet.balance}"
         )
 
     try:
@@ -288,7 +288,7 @@ async def upgrade_level(
         old_level_price = current_level.earnest_money
         now = datetime.utcnow()
 
-        wallet.income -= difference  # Upgrade cost deducted from income wallet
+        wallet.balance -= difference
         wallet.income += old_level_price  # Refund goes to income wallet
         
         # Record upgrade cost
