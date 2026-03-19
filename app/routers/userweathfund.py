@@ -165,8 +165,8 @@ async def complete_matured_funds(db: AsyncSession):
         db.add(fresh_fund)
         await db.flush()   # write to DB within the transaction, not yet committed
 
-        # ── 4. Credit wallet (commission/balance section) ───────────────────
-        wallet.balance = round(wallet.balance + final_payout, 6)
+        # ── 4. Credit wallet (income section) ─────────────────────────────────
+        wallet.income = round(wallet.income + final_payout, 6)
         db.add(wallet)
 
         # ── 5. Record income transaction ─────────────────────────────────────
