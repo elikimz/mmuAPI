@@ -78,6 +78,19 @@ async def expire_user_levels():
                         .values(status="expired")
                     )
 
+                    # 3. Notify the user via WebSocket so the frontend can invalidate caches
+                    try:
+                        from app.core.websocket_manager import manager
+                        from app.core.redis_cache import cache
+                        await cache.delete(f"user_profile_{level.user_id}")
+                        await manager.send_personal_message(level.user_id, {
+                            "type": "LEVEL_EXPIRED",
+                            "level_id": level.level_id,
+                            "level_name": level.name,
+                        })
+                    except Exception as comm_e:
+                        print(f"Warning: Post-expiry communication failed for user {level.user_id}: {comm_e}")
+
                 await session.commit()
                 print(
                     f"[{datetime.now(KENYA_TZ)}] Level Expiry: "
