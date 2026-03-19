@@ -289,6 +289,7 @@ class UserLevelResponse(BaseModel):
     annual_income: float
     created_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None  # When this level expires for the user
+    status: str = "active"                 # 'active' | 'expired'
 
     model_config = {
         "from_attributes": True
@@ -328,8 +329,8 @@ class UserTaskResponse(BaseModel):
     locked: Optional[bool] = False  
     reward: float
     description: Optional[str]
-    level_name: str 
-
+    level_name: str
+    status: str = "active"          # 'active' | 'expired'
 
     model_config = {
         "from_attributes": True  # ✅ Required for SQLAlchemy v2 async

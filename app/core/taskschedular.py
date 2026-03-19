@@ -2,7 +2,11 @@
 Task Scheduler — runs two recurring jobs:
 
 1. reset_daily_tasks()    — midnight EAT: resets all user tasks for the new day
-2. expire_user_levels()   — hourly: removes user levels whose expires_at has passed
+                            (only for ACTIVE user levels; skips expired levels)
+2. expire_user_levels()   — every 5 minutes: marks UserLevel + UserTask records
+                            as 'expired' when expires_at has passed.
+                            Uses database state as source of truth — does NOT
+                            delete records so history is preserved.
 """
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import update, delete, select
@@ -15,31 +19,119 @@ from app.database.database import get_async_db
 KENYA_TZ = pytz.timezone("Africa/Nairobi")
 
 
+async def expire_user_levels():
+    """
+    Runs every 5 minutes.
+
+    Finds all UserLevel records where:
+        expires_at < now  AND  status = 'active'
+
+    For each such level:
+        1. Mark UserLevel.status → 'expired'
+        2. Mark all UserTask records for that user → status = 'expired'
+           (tasks are NOT deleted — history is preserved)
+
+    Legacy fallback: intern levels without expires_at that are older than 3 days
+    are also expired via the same status-update path.
+
+    This ensures expiry is enforced even when users are offline.
+    """
+    from app.models.models import UserTask, UserLevel
+    try:
+        async for session in get_async_db():
+            now_utc = datetime.utcnow()
+
+            # ── Primary path: levels with an explicit expires_at ──────────
+            result = await session.execute(
+                select(UserLevel).filter(
+                    UserLevel.expires_at.isnot(None),
+                    UserLevel.expires_at <= now_utc,
+                    UserLevel.status == "active",
+                )
+            )
+            expired_levels = result.scalars().all()
+
+            # ── Legacy fallback: intern levels without expires_at > 3 days ─
+            legacy_cutoff = now_utc - timedelta(days=3)
+            legacy_result = await session.execute(
+                select(UserLevel).filter(
+                    UserLevel.expires_at.is_(None),
+                    UserLevel.name.ilike("intern"),
+                    UserLevel.created_at <= legacy_cutoff,
+                    UserLevel.status == "active",
+                )
+            )
+            legacy_levels = legacy_result.scalars().all()
+
+            all_expired = expired_levels + legacy_levels
+
+            if all_expired:
+                for level in all_expired:
+                    # 1. Mark the level itself as expired
+                    level.status = "expired"
+                    session.add(level)
+
+                    # 2. Mark all UserTask records for this user as expired
+                    await session.execute(
+                        update(UserTask)
+                        .where(UserTask.user_id == level.user_id)
+                        .values(status="expired")
+                    )
+
+                await session.commit()
+                print(
+                    f"[{datetime.now(KENYA_TZ)}] Level Expiry: "
+                    f"{len(all_expired)} level(s) marked expired "
+                    f"({len(expired_levels)} via expires_at, "
+                    f"{len(legacy_levels)} via legacy intern rule). "
+                    f"Associated UserTask records marked expired."
+                )
+            else:
+                print(f"[{datetime.now(KENYA_TZ)}] Level Expiry: No newly expired levels found.")
+
+    except Exception as e:
+        print(f"[{datetime.now(KENYA_TZ)}] ERROR in expire_user_levels: {e}")
+        import traceback
+        print(traceback.format_exc())
+
+
 async def reset_daily_tasks():
     """
     Runs daily at midnight EAT.
 
-    For each user that has an active UserLevel:
+    For each user that has an ACTIVE UserLevel (status = 'active'):
       1. Identify which task IDs belong to the user's CURRENT level.
       2. Delete any UserTask records for that user whose task does NOT belong
          to the current level (stale tasks from a previous level).
-      3. Reset completion flags on remaining tasks.
-      4. Clear UserTaskPending and UserTaskCompleted tables.
+      3. Reset completion flags on remaining ACTIVE tasks.
+      4. Clear UserTaskPending and UserTaskCompleted tables for active users.
       5. Ensure every task for the current level is assigned (idempotent).
 
-    This guarantees that even if a stale task somehow survived an upgrade,
-    the nightly reset will clean it up.
+    Expired levels are explicitly SKIPPED — their tasks are not reset.
     """
     from app.models.models import UserTask, UserTaskPending, UserTaskCompleted, UserLevel, Task
     try:
         async for session in get_async_db():
-            # 1. Clear pending and completed history for the new day
-            await session.execute(delete(UserTaskPending))
-            await session.execute(delete(UserTaskCompleted))
-
-            # 2. Process each active user level
-            user_levels_result = await session.execute(select(UserLevel))
+            # Fetch only ACTIVE user levels
+            user_levels_result = await session.execute(
+                select(UserLevel).filter(UserLevel.status == "active")
+            )
             user_levels = user_levels_result.scalars().all()
+
+            active_user_ids = [ul.user_id for ul in user_levels]
+
+            # Clear pending and completed history only for active users
+            if active_user_ids:
+                await session.execute(
+                    delete(UserTaskPending).where(
+                        UserTaskPending.user_id.in_(active_user_ids)
+                    )
+                )
+                await session.execute(
+                    delete(UserTaskCompleted).where(
+                        UserTaskCompleted.user_id.in_(active_user_ids)
+                    )
+                )
 
             reset_count = 0
             purged_count = 0
@@ -69,13 +161,14 @@ async def reset_daily_tasks():
                 )
                 purged_count += purge_result.rowcount
 
-                # 2b. Reset completion flags on valid tasks
+                # 2b. Reset completion flags on valid ACTIVE tasks
                 reset_result = await session.execute(
                     update(UserTask)
                     .where(
                         UserTask.user_id == ul.user_id,
                         UserTask.task_id.in_(valid_task_ids),
                         UserTask.completed == True,
+                        UserTask.status == "active",
                     )
                     .values(completed=False)
                 )
@@ -90,7 +183,6 @@ async def reset_daily_tasks():
                         )
                     )
                     if not existing.scalar_one_or_none():
-                        # Fetch full task to get video_url
                         task_obj = await session.get(Task, task_id)
                         if task_obj:
                             session.add(UserTask(
@@ -98,12 +190,13 @@ async def reset_daily_tasks():
                                 task_id=task_id,
                                 video_url=task_obj.video_url,
                                 completed=False,
+                                status="active",
                             ))
                             new_tasks_count += 1
 
             await session.commit()
             print(
-                f"[{datetime.now(KENYA_TZ)}] Daily Reset: "
+                f"[{datetime.now(KENYA_TZ)}] Daily Reset (active levels only): "
                 f"{reset_count} tasks reset, "
                 f"{purged_count} stale tasks purged, "
                 f"{new_tasks_count} new task assignments created."
@@ -114,83 +207,25 @@ async def reset_daily_tasks():
         print(traceback.format_exc())
 
 
-async def expire_user_levels():
-    """
-    Runs hourly.
-    Removes UserLevel records whose expires_at has passed, and deletes
-    the associated UserTask records so the user loses access.
-
-    Supports ALL levels generically — not just 'Intern'.
-    Legacy fallback: if a level is named 'intern' and has no expires_at,
-    it falls back to the original 3-day rule based on created_at.
-    """
-    from app.models.models import UserTask, UserTaskPending, UserTaskCompleted, UserLevel
-    try:
-        async for session in get_async_db():
-            now_utc = datetime.utcnow()
-
-            # Primary path: use expires_at column
-            result = await session.execute(
-                select(UserLevel).filter(
-                    UserLevel.expires_at.isnot(None),
-                    UserLevel.expires_at <= now_utc
-                )
-            )
-            expired_levels = result.scalars().all()
-
-            # Legacy fallback: intern levels without expires_at older than 3 days
-            legacy_cutoff = now_utc - timedelta(days=3)
-            legacy_result = await session.execute(
-                select(UserLevel).filter(
-                    UserLevel.expires_at.is_(None),
-                    UserLevel.name.ilike("intern"),
-                    UserLevel.created_at <= legacy_cutoff
-                )
-            )
-            legacy_levels = legacy_result.scalars().all()
-
-            all_expired = expired_levels + legacy_levels
-
-            if all_expired:
-                for level in all_expired:
-                    # Remove all task records for this user on expiry
-                    await session.execute(
-                        delete(UserTaskPending).where(UserTaskPending.user_id == level.user_id)
-                    )
-                    await session.execute(
-                        delete(UserTaskCompleted).where(UserTaskCompleted.user_id == level.user_id)
-                    )
-                    await session.execute(
-                        delete(UserTask).where(UserTask.user_id == level.user_id)
-                    )
-                    await session.delete(level)
-
-                await session.commit()
-                print(
-                    f"[{datetime.now(KENYA_TZ)}] Level Expiry: "
-                    f"{len(all_expired)} level(s) expired and removed "
-                    f"({len(expired_levels)} via expires_at, "
-                    f"{len(legacy_levels)} via legacy intern rule)."
-                )
-            else:
-                print(f"[{datetime.now(KENYA_TZ)}] Level Expiry: No expired levels found.")
-
-    except Exception as e:
-        print(f"[{datetime.now(KENYA_TZ)}] ERROR in expire_user_levels: {e}")
-        import traceback
-        print(traceback.format_exc())
-
-
 def start_task_scheduler():
     """
     Initialises and starts the APScheduler async scheduler.
     Jobs:
-      - Daily task reset at midnight EAT
-      - Hourly level expiry check
+      - Level expiry check every 5 minutes (marks status = 'expired')
+      - Daily task reset at midnight EAT (active levels only)
     """
     scheduler = AsyncIOScheduler(timezone=KENYA_TZ)
 
-    # 1. Daily task reset at midnight EAT
+    # 1. Level expiry check every 5 minutes
+    scheduler.add_job(
+        expire_user_levels,
+        trigger="interval",
+        minutes=5,
+        id="level_expiry_check",
+        replace_existing=True,
+    )
+
+    # 2. Daily task reset at midnight EAT
     scheduler.add_job(
         reset_daily_tasks,
         trigger="cron",
@@ -201,17 +236,8 @@ def start_task_scheduler():
         replace_existing=True,
     )
 
-    # 2. Hourly level expiry check
-    scheduler.add_job(
-        expire_user_levels,
-        trigger="interval",
-        hours=1,
-        id="level_expiry_check",
-        replace_existing=True,
-    )
-
     scheduler.start()
     print(
         f"[{datetime.now(KENYA_TZ)}] Scheduler started: "
-        f"Daily Reset (00:00 EAT) & Level Expiry (hourly check)."
+        f"Level Expiry (every 5 min) & Daily Reset (00:00 EAT, active levels only)."
     )

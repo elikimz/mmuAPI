@@ -98,6 +98,7 @@ async def reset_user_tasks_for_level(db: AsyncSession, user_id: int, level_id: i
             task_id=t.id,
             video_url=t.video_url,
             completed=False,
+            status="active",   # fresh assignment is always active
         ))
 
     return len(new_tasks)
@@ -181,6 +182,7 @@ async def buy_level(
             annual_income=level.annual_income,
             created_at=now,
             expires_at=expires_at,
+            status="active",   # new level is always active on purchase
         )
         db.add(user_level)
 
@@ -310,6 +312,7 @@ async def upgrade_level(
         current_level.annual_income = level.annual_income
         current_level.created_at = now
         current_level.expires_at = expires_at
+        current_level.status = "active"   # reset to active on upgrade
         db.add(current_level)
 
         # ---------------------------------------------------------------

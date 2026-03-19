@@ -153,6 +153,8 @@ class UserTask(Base):
     completed = Column(Boolean, default=False)
     locked = Column(Boolean, default=False)
     description = Column(String, nullable=True)
+    # 'active' | 'expired' — set to 'expired' when the parent level expires
+    status = Column(String, default="active", nullable=False)
 
     user = relationship("User", back_populates="tasks")
     task = relationship("Task", back_populates="user_tasks")
@@ -208,6 +210,8 @@ class UserLevel(Base):
     annual_income = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=True)  # Computed from level.expiry_days at purchase/upgrade time
+    # 'active' | 'expired' — updated by the scheduler when expires_at is reached
+    status = Column(String, default="active", nullable=False)
     user = relationship("User", back_populates="levels")
     level = relationship("Level", back_populates="user_levels")
 

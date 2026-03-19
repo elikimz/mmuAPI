@@ -4,6 +4,7 @@ from sqlalchemy.future import select
 from typing import List
 
 from app.database.database import get_async_db
+from sqlalchemy import update as sa_update
 from app.models.models import (
     Task,
     Level,
@@ -72,9 +73,13 @@ async def create_task(
     db.add(new_task)
     await db.flush()  # 👈 allows access to new_task.id before commit
 
-    # 🔥 Assign task to all users who already bought this level
+    # Assign task only to users with an ACTIVE level for this level_id.
+    # Expired levels must not receive new task assignments.
     result = await db.execute(
-        select(UserLevel).filter(UserLevel.level_id == task.level_id)
+        select(UserLevel).filter(
+            UserLevel.level_id == task.level_id,
+            UserLevel.status == "active",
+        )
     )
     user_levels = result.scalars().all()
 
@@ -85,6 +90,7 @@ async def create_task(
                 task_id=new_task.id,
                 video_url=new_task.video_url,
                 completed=False,
+                status="active",
             )
         )
 

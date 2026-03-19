@@ -1,5 +1,12 @@
+"""
+User Task Router
 
+All task-related endpoints enforce:
+  - UserTask.status = 'active'          (never return expired tasks as active)
+  - The user's UserLevel.status = 'active'  (block interaction if level expired)
 
+This ensures the database is the single source of truth for expiry state.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,13 +16,13 @@ from typing import List
 from datetime import datetime, timedelta
 import asyncio
 
-# from app.core.process_task_completion_referral_bonus import process_task_completion_referral_bonus
 from app.database.database import get_async_db
 from app.models.models import (
     User,
     UserTask,
     UserTaskPending,
     UserTaskCompleted,
+    UserLevel,
     Task,
     Wallet,
     Transaction,
@@ -33,18 +40,62 @@ from app.core.redis_cache import cache
 
 router = APIRouter(prefix="/user-tasks", tags=["User Tasks"])
 
-# -------------------------
-# USER: Get my tasks
-# -------------------------
+
+# ─────────────────────────────────────────────
+# Helper: assert user has an active level
+# ─────────────────────────────────────────────
+async def _require_active_level(user_id: int, db: AsyncSession) -> UserLevel:
+    """
+    Returns the user's active UserLevel or raises HTTP 403 if the level is
+    expired or missing.  Used by mutation endpoints (complete task) to prevent
+    any interaction with tasks when the level has expired.
+    """
+    result = await db.execute(
+        select(UserLevel).filter(
+            UserLevel.user_id == user_id,
+            UserLevel.status == "active",
+        )
+    )
+    user_level = result.scalar_one_or_none()
+    if not user_level:
+        raise HTTPException(
+            status_code=403,
+            detail="Your level has expired or you do not have an active level. "
+                   "Please upgrade to continue.",
+        )
+    return user_level
+
+
+# ─────────────────────────────────────────────
+# USER: Get my tasks (active only)
+# ─────────────────────────────────────────────
 @router.get("/me", response_model=List[UserTaskResponse])
 async def get_my_tasks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    """
+    Returns only tasks with status = 'active' AND whose parent level is active.
+    Expired tasks are never returned as active.
+    """
+    # Check if user has an active level; return empty list if not
+    level_result = await db.execute(
+        select(UserLevel).filter(
+            UserLevel.user_id == current_user.id,
+            UserLevel.status == "active",
+        )
+    )
+    active_level = level_result.scalar_one_or_none()
+    if not active_level:
+        return []
+
     result = await db.execute(
         select(UserTask)
         .options(joinedload(UserTask.task).joinedload(Task.level))
-        .filter(UserTask.user_id == current_user.id)
+        .filter(
+            UserTask.user_id == current_user.id,
+            UserTask.status == "active",          # only active tasks
+        )
     )
     user_tasks = result.scalars().all()
 
@@ -65,14 +116,63 @@ async def get_my_tasks(
     ]
 
 
-# -------------------------
+# ─────────────────────────────────────────────
+# USER: Get my expired tasks (read-only view)
+# ─────────────────────────────────────────────
+@router.get("/me/expired", response_model=List[UserTaskResponse])
+async def get_my_expired_tasks(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Returns tasks with status = 'expired' for display purposes (disabled UI).
+    These tasks cannot be interacted with.
+    """
+    result = await db.execute(
+        select(UserTask)
+        .options(joinedload(UserTask.task).joinedload(Task.level))
+        .filter(
+            UserTask.user_id == current_user.id,
+            UserTask.status == "expired",
+        )
+    )
+    user_tasks = result.scalars().all()
+
+    return [
+        {
+            "id": ut.id,
+            "user_id": ut.user_id,
+            "task_id": ut.task_id,
+            "video_url": ut.video_url,
+            "completed": ut.completed,
+            "locked": True,          # always locked in expired state
+            "reward": ut.task.reward,
+            "description": ut.description,
+            "level_name": ut.task.level.name,
+        }
+        for ut in user_tasks
+        if ut.task and ut.task.level
+    ]
+
+
+# ─────────────────────────────────────────────
 # USER: Pending tasks
-# -------------------------
+# ─────────────────────────────────────────────
 @router.get("/me/pending", response_model=List[UserTaskPendingResponse])
 async def get_my_pending_tasks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    # Only return pending tasks when the user has an active level
+    level_result = await db.execute(
+        select(UserLevel).filter(
+            UserLevel.user_id == current_user.id,
+            UserLevel.status == "active",
+        )
+    )
+    if not level_result.scalar_one_or_none():
+        return []
+
     result = await db.execute(
         select(UserTaskPending)
         .options(joinedload(UserTaskPending.task).joinedload(Task.level))
@@ -96,9 +196,9 @@ async def get_my_pending_tasks(
     ]
 
 
-# -------------------------
+# ─────────────────────────────────────────────
 # USER: Completed tasks
-# -------------------------
+# ─────────────────────────────────────────────
 @router.get("/me/completed", response_model=List[UserTaskCompletedResponse])
 async def get_my_completed_tasks(
     current_user: User = Depends(get_current_user),
@@ -126,27 +226,34 @@ async def get_my_completed_tasks(
     ]
 
 
-# -------------------------
+# ─────────────────────────────────────────────
 # USER: Complete task
-# -------------------------
+# ─────────────────────────────────────────────
 @router.post("/complete", response_model=UserTaskResponse)
 async def complete_task(
     request: CompleteTaskRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    # Gate: user must have an active level to complete any task
+    await _require_active_level(current_user.id, db)
+
     result = await db.execute(
         select(UserTask)
         .options(joinedload(UserTask.task).joinedload(Task.level))
         .filter(
             UserTask.user_id == current_user.id,
             UserTask.id == request.user_task_id,
+            UserTask.status == "active",          # reject expired tasks
         )
     )
     user_task = result.scalar_one_or_none()
 
     if not user_task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found or has expired.",
+        )
     if user_task.completed:
         raise HTTPException(status_code=400, detail="Task already completed")
     if user_task.locked:
@@ -168,7 +275,7 @@ async def complete_task(
             user_id=current_user.id,
             task_id=user_task.task_id,
             video_url=user_task.video_url,
-            pending_until=datetime.utcnow() + timedelta(seconds=10), # 10 seconds delay
+            pending_until=datetime.utcnow() + timedelta(seconds=10),
             created_at=datetime.utcnow(),
         )
         db.add(pending)
@@ -182,7 +289,6 @@ async def complete_task(
         await db.refresh(pending)
 
         try:
-            # Invalidate cache for immediate UI update
             await cache.delete(f"user_profile_{current_user.id}")
             await manager.send_personal_message(current_user.id, {
                 "type": "TASK_SUBMITTED_PENDING",
@@ -191,15 +297,16 @@ async def complete_task(
                 "pending_until": pending.pending_until.isoformat()
             })
         except Exception as comm_e:
-            print(f"Warning: Post-commit communication failed for user {current_user.id} after task submission: {str(comm_e)}")
-            # Do not re-raise, as the transaction is already committed.
+            print(
+                f"Warning: Post-commit communication failed for user "
+                f"{current_user.id} after task submission: {str(comm_e)}"
+            )
 
         # Background task to finalize after delay
         async def finalize_task_bg(user_id: int, task_id: int, pending_task_id: int):
             await asyncio.sleep(10)
             async with AsyncSession(db.bind) as bg_db:
                 try:
-                    # Re-fetch pending task within new session
                     pending_result = await bg_db.execute(
                         select(UserTaskPending)
                         .options(joinedload(UserTaskPending.task))
@@ -208,11 +315,12 @@ async def complete_task(
                     pending_task = pending_result.scalar_one_or_none()
 
                     if not pending_task:
-                        # Task might have been manually processed or removed
-                        print(f"Background task: Pending task {pending_task_id} not found. Skipping finalization.")
+                        print(
+                            f"Background task: Pending task {pending_task_id} "
+                            f"not found. Skipping finalization."
+                        )
                         return
 
-                    # Move from pending to completed
                     completed = UserTaskCompleted(
                         user_id=user_id,
                         task_id=task_id,
@@ -222,14 +330,13 @@ async def complete_task(
                     bg_db.add(completed)
                     await bg_db.delete(pending_task)
 
-                    # Update wallet and add transaction
                     wallet_result = await bg_db.execute(
                         select(Wallet).filter(Wallet.user_id == user_id)
                     )
                     wallet = wallet_result.scalar_one_or_none()
 
-                    # Attempt to update wallet and add transaction
                     wallet_updated = False
+                    reward_amount = 0
                     if wallet:
                         try:
                             reward_amount = pending_task.task.reward
@@ -245,14 +352,16 @@ async def complete_task(
                             bg_db.add(wallet)
                             wallet_updated = True
                         except Exception as wallet_e:
-                            print(f"Warning: Background task failed to update wallet or add transaction for user {user_id}, task {task_id}: {str(wallet_e)}")
+                            print(
+                                f"Warning: Background task failed to update wallet "
+                                f"for user {user_id}, task {task_id}: {str(wallet_e)}"
+                            )
                             import traceback
                             print(traceback.format_exc())
 
                     await bg_db.commit()
-                    
+
                     try:
-                        # Invalidate cache and notify via WebSocket for final completion
                         await cache.delete(f"user_profile_{user_id}")
                         await manager.send_personal_message(user_id, {
                             "type": "TASK_COMPLETED",
@@ -260,20 +369,28 @@ async def complete_task(
                             "reward": reward_amount if wallet_updated else 0,
                             "new_income": wallet.income if wallet_updated else 0
                         })
-                        print(f"Background task: Task {task_id} finalized for user {user_id}.")
+                        print(
+                            f"Background task: Task {task_id} finalized "
+                            f"for user {user_id}."
+                        )
                     except Exception as comm_e:
-                        print(f"Warning: Background task post-commit communication failed for user {user_id} after task finalization: {str(comm_e)}")
-                        # Do not re-raise, as the transaction is already committed.
+                        print(
+                            f"Warning: Background task post-commit communication "
+                            f"failed for user {user_id}: {str(comm_e)}"
+                        )
 
                 except Exception as bg_e:
-                    # If any error occurs before commit, rollback and log
                     await bg_db.rollback()
-                    print(f"Background task error finalizing task {task_id} for user {user_id}: {str(bg_e)}")
+                    print(
+                        f"Background task error finalizing task {task_id} "
+                        f"for user {user_id}: {str(bg_e)}"
+                    )
                     import traceback
                     print(traceback.format_exc())
-                    # Optionally, re-add the pending task or log for manual review if critical
 
-        asyncio.create_task(finalize_task_bg(current_user.id, user_task.task_id, pending.id))
+        asyncio.create_task(
+            finalize_task_bg(current_user.id, user_task.task_id, pending.id)
+        )
 
         return {
             "id": user_task.id,
@@ -288,123 +405,53 @@ async def complete_task(
         }
 
     except HTTPException:
-        raise # Re-raise FastAPI HTTPExceptions
+        raise
     except Exception as e:
         await db.rollback()
-        print(f"Error completing task for user {current_user.id}, task {request.user_task_id}: {str(e)}")
         import traceback
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
-
-
-# -------------------------
-# ADMIN: Lock / Unlock
-# -------------------------
-@router.patch("/{user_task_id}/lock", response_model=UserTaskResponse)
-async def lock_user_task(
-    user_task_id: int,
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db),
-):
-    task = (
-        await db.execute(
-            select(UserTask)
-            .options(joinedload(UserTask.task).joinedload(Task.level))
-            .filter(UserTask.id == user_task_id)
+        print(
+            f"Error completing task for user {current_user.id}: "
+            f"{e}\n{traceback.format_exc()}"
         )
-    ).scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(status_code=404, detail="User task not found")
-
-    task.locked = True
-    await db.commit()
-    await db.refresh(task)
-
-    return {
-        "id": task.id,
-        "user_id": task.user_id,
-        "task_id": task.task_id,
-        "video_url": task.video_url,
-        "completed": task.completed,
-        "locked": task.locked,
-        "reward": task.task.reward,
-        "description": task.description,
-        "level_name": task.task.level.name,
-    }
-
-
-@router.patch("/{user_task_id}/unlock", response_model=UserTaskResponse)
-async def unlock_user_task(
-    user_task_id: int,
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db),
-):
-    task = (
-        await db.execute(
-            select(UserTask)
-            .options(joinedload(UserTask.task).joinedload(Task.level))
-            .filter(UserTask.id == user_task_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"An unexpected error occurred: {str(e)}"
         )
-    ).scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(status_code=404, detail="User task not found")
-
-    task.locked = False
-    await db.commit()
-    await db.refresh(task)
-
-    return {
-        "id": task.id,
-        "user_id": task.user_id,
-        "task_id": task.task_id,
-        "video_url": task.video_url,
-        "completed": task.completed,
-        "locked": task.locked,
-        "reward": task.task.reward,
-        "description": task.description,
-        "level_name": task.task.level.name,
-    }
 
 
-
-
-
-
+# ─────────────────────────────────────────────
+# ADMIN: Get all user tasks
+# ─────────────────────────────────────────────
 @router.get("/admin/all", response_model=List[UserTaskResponse])
 async def get_all_user_tasks(
     admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     result = await db.execute(
         select(UserTask)
         .options(joinedload(UserTask.task).joinedload(Task.level))
     )
-    all_tasks = result.scalars().all()
-
-    tasks_with_reward_and_level = []
-    for user_task in all_tasks:
-        if user_task.task and user_task.task.level:
-            task_data = {
-                "id": user_task.id,
-                "user_id": user_task.user_id,
-                "task_id": user_task.task_id,
-                "video_url": user_task.video_url,
-                "completed": user_task.completed,
-                "locked": user_task.locked if hasattr(user_task, 'locked') else False,
-                "reward": user_task.task.reward,
-                "description": user_task.description,
-                "level_name": user_task.task.level.name
-            }
-            tasks_with_reward_and_level.append(task_data)
-
-    return tasks_with_reward_and_level
+    user_tasks = result.scalars().all()
+    return [
+        {
+            "id": ut.id,
+            "user_id": ut.user_id,
+            "task_id": ut.task_id,
+            "video_url": ut.video_url,
+            "completed": ut.completed,
+            "locked": ut.locked,
+            "reward": ut.task.reward,
+            "description": ut.description,
+            "level_name": ut.task.level.name,
+        }
+        for ut in user_tasks
+        if ut.task and ut.task.level
+    ]
 
 
-# -------------------------
-# ADMIN: All pending tasks
-# -------------------------
+# ─────────────────────────────────────────────
+# ADMIN: Get all pending tasks
+# ─────────────────────────────────────────────
 @router.get("/admin/all/pending", response_model=List[UserTaskPendingResponse])
 async def get_all_pending_tasks(
     admin: User = Depends(get_current_admin),
@@ -414,8 +461,7 @@ async def get_all_pending_tasks(
         select(UserTaskPending)
         .options(joinedload(UserTaskPending.task).joinedload(Task.level))
     )
-    pending_tasks = result.scalars().all()
-
+    pending = result.scalars().all()
     return [
         {
             "id": p.id,
@@ -427,14 +473,14 @@ async def get_all_pending_tasks(
             "reward": p.task.reward,
             "level_name": p.task.level.name,
         }
-        for p in pending_tasks
+        for p in pending
         if p.task and p.task.level
     ]
 
 
-# -------------------------
-# ADMIN: All completed tasks
-# -------------------------
+# ─────────────────────────────────────────────
+# ADMIN: Get all completed tasks
+# ─────────────────────────────────────────────
 @router.get("/admin/all/completed", response_model=List[UserTaskCompletedResponse])
 async def get_all_completed_tasks(
     admin: User = Depends(get_current_admin),
@@ -444,8 +490,7 @@ async def get_all_completed_tasks(
         select(UserTaskCompleted)
         .options(joinedload(UserTaskCompleted.task).joinedload(Task.level))
     )
-    completed_tasks = result.scalars().all()
-
+    completed = result.scalars().all()
     return [
         {
             "id": c.id,
@@ -456,6 +501,71 @@ async def get_all_completed_tasks(
             "reward": c.task.reward,
             "level_name": c.task.level.name,
         }
-        for c in completed_tasks
+        for c in completed
         if c.task and c.task.level
     ]
+
+
+# ─────────────────────────────────────────────
+# ADMIN: Lock / Unlock user task
+# ─────────────────────────────────────────────
+@router.patch("/{user_task_id}/lock", response_model=UserTaskResponse)
+async def lock_user_task(
+    user_task_id: int,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(
+        select(UserTask)
+        .options(joinedload(UserTask.task).joinedload(Task.level))
+        .filter(UserTask.id == user_task_id)
+    )
+    ut = result.scalar_one_or_none()
+    if not ut:
+        raise HTTPException(status_code=404, detail="User task not found")
+    ut.locked = True
+    db.add(ut)
+    await db.commit()
+    await db.refresh(ut)
+    return {
+        "id": ut.id,
+        "user_id": ut.user_id,
+        "task_id": ut.task_id,
+        "video_url": ut.video_url,
+        "completed": ut.completed,
+        "locked": ut.locked,
+        "reward": ut.task.reward,
+        "description": ut.description,
+        "level_name": ut.task.level.name,
+    }
+
+
+@router.patch("/{user_task_id}/unlock", response_model=UserTaskResponse)
+async def unlock_user_task(
+    user_task_id: int,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(
+        select(UserTask)
+        .options(joinedload(UserTask.task).joinedload(Task.level))
+        .filter(UserTask.id == user_task_id)
+    )
+    ut = result.scalar_one_or_none()
+    if not ut:
+        raise HTTPException(status_code=404, detail="User task not found")
+    ut.locked = False
+    db.add(ut)
+    await db.commit()
+    await db.refresh(ut)
+    return {
+        "id": ut.id,
+        "user_id": ut.user_id,
+        "task_id": ut.task_id,
+        "video_url": ut.video_url,
+        "completed": ut.completed,
+        "locked": ut.locked,
+        "reward": ut.task.reward,
+        "description": ut.description,
+        "level_name": ut.task.level.name,
+    }
