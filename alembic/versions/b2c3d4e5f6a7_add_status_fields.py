@@ -15,6 +15,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.engine.reflection import Inspector
 
 
 # revision identifiers, used by Alembic.
@@ -25,23 +26,24 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add status column to user_levels
-    try:
+    conn = op.get_bind()
+    inspector = Inspector.from_engine(conn)
+    
+    # Check and add status column to user_levels
+    columns = [c['name'] for c in inspector.get_columns('user_levels')]
+    if 'status' not in columns:
         op.add_column(
             'user_levels',
             sa.Column('status', sa.String(), nullable=False, server_default='active')
         )
-    except Exception:
-        pass  # Column already exists
-
-    # Add status column to user_tasks
-    try:
+    
+    # Check and add status column to user_tasks
+    columns = [c['name'] for c in inspector.get_columns('user_tasks')]
+    if 'status' not in columns:
         op.add_column(
             'user_tasks',
             sa.Column('status', sa.String(), nullable=False, server_default='active')
         )
-    except Exception:
-        pass  # Column already exists
 
     # Back-fill existing rows to 'active'
     op.execute("UPDATE user_levels SET status = 'active' WHERE status IS NULL OR status = ''")
@@ -49,11 +51,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    try:
-        op.drop_column('user_tasks', 'status')
-    except Exception:
-        pass
-    try:
-        op.drop_column('user_levels', 'status')
-    except Exception:
-        pass
+    op.drop_column('user_tasks', 'status')
+    op.drop_column('user_levels', 'status')
