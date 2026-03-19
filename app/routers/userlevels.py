@@ -48,14 +48,14 @@ async def apply_referral_bonus(db: AsyncSession, user_id: int, bonus_amount: flo
     if not wallet:
         return  # Don't crash the whole purchase if a referrer's wallet is missing
 
-    wallet.income += bonus_amount
+    wallet.balance += bonus_amount
+    db.add(wallet)
     db.add(Transaction(
         user_id=user_id,
         type=TransactionType.REFERRAL_BONUS.value,
         amount=bonus_amount,
         created_at=datetime.utcnow()
     ))
-    db.add(wallet)
 
 
 # -------------------------
