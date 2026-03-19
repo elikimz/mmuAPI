@@ -323,6 +323,7 @@ class TransactionType(str, Enum):
     WITHDRAWAL_REJECTED_REFUND = "withdrawal_rejected_refund"
     LEVEL_PURCHASE = "level_purchase"
     LEVEL_UPGRADE = "level_upgrade"
+    LEVEL_UPGRADE_REFUND = "level_upgrade_refund"
 
 # In your Transaction model
 class Transaction(Base):

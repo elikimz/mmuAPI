@@ -289,13 +289,24 @@ async def upgrade_level(
         now = datetime.utcnow()
 
         wallet.balance -= difference
-        wallet.income += old_level_price
+        wallet.income += old_level_price  # Refund goes to income wallet
+        
+        # Record upgrade cost
         db.add(Transaction(
             user_id=current_user.id,
             type=TransactionType.LEVEL_UPGRADE.value,
             amount=difference,
             created_at=now
         ))
+        
+        # Record refund
+        if old_level_price > 0:
+            db.add(Transaction(
+                user_id=current_user.id,
+                type=TransactionType.LEVEL_UPGRADE_REFUND.value,
+                amount=old_level_price,
+                created_at=now
+            ))
 
         # Compute new expiry
         expires_at = compute_expires_at(level.expiry_days)

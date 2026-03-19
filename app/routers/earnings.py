@@ -58,6 +58,7 @@ async def get_earnings_overview(
         TransactionType.WEALTH_FUND_MATURITY,
         TransactionType.COMMISSION,
         TransactionType.GIFT_REDEMPTION,
+        TransactionType.LEVEL_UPGRADE_REFUND,
     ]
 
     async def sum_earnings(start_date: datetime = None, end_date: datetime = None, types: list = None):
