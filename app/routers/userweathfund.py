@@ -72,7 +72,7 @@ async def update_daily_interest(db: AsyncSession):
 
         fund.today_interest = daily_gain          # today's single-day gain
         fund.total_profit = round(fund.total_profit + total_gain, 6)
-        fund.last_interest_update = now
+        fund.last_interest_update = now_utc
         updated_count += 1
 
         logger.info(
