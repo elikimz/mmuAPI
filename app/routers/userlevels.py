@@ -289,7 +289,7 @@ async def upgrade_level(
         now = datetime.utcnow()
 
         wallet.balance -= difference
-        wallet.income += old_level_price  # Refund goes to income wallet
+        wallet.balance += old_level_price  # Refund goes to commission wallet (balance)
         
         # Record upgrade cost
         db.add(Transaction(
