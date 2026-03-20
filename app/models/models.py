@@ -309,8 +309,9 @@ class TransactionType(str, Enum):
     # Income (Credit)
     TASK_REWARD = "task_reward"
     REFERRAL_BONUS = "referral_bonus"
-    WEALTH_FUND_MATURITY = "wealth_fund_maturity"
-    REFERRAL_REBATE = "referral_rebate" 
+    WEALTH_FUND_MATURITY = "wealth_fund_maturity"          # profit portion on maturity
+    WEALTH_FUND_PRINCIPAL_RETURN = "wealth_fund_principal_return"  # principal returned on maturity
+    REFERRAL_REBATE = "referral_rebate"
     DEPOSIT = "deposit"
     COMMISSION = "commission"
     GIFT_REDEMPTION = "gift_redemption"

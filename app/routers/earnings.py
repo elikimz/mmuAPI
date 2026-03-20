@@ -38,7 +38,7 @@ async def get_earnings_overview(
     # Calculate yesterday's range in Kenya time
     yesterday_start_kenya = today_start_kenya - timedelta(days=1)
     yesterday_end_kenya = today_start_kenya
-    
+
     yesterday_start_utc = yesterday_start_kenya - kenya_offset
     yesterday_end_utc = yesterday_end_kenya - kenya_offset
 
@@ -50,12 +50,15 @@ async def get_earnings_overview(
     month_start_kenya = today_start_kenya.replace(day=1)
     month_start_utc = month_start_kenya - kenya_offset
 
-    # All positive earnings types
+    # All positive earnings types.
+    # WEALTH_FUND_PRINCIPAL_RETURN is included so that the principal returned
+    # on fund maturity is correctly counted in all earnings aggregates.
     earning_types = [
         TransactionType.TASK_REWARD,
         TransactionType.REFERRAL_BONUS,
         TransactionType.REFERRAL_REBATE,
         TransactionType.WEALTH_FUND_MATURITY,
+        TransactionType.WEALTH_FUND_PRINCIPAL_RETURN,
         TransactionType.COMMISSION,
         TransactionType.GIFT_REDEMPTION,
         TransactionType.LEVEL_UPGRADE_REFUND,
@@ -72,7 +75,7 @@ async def get_earnings_overview(
             query = query.filter(Transaction.created_at >= start_date)
         if end_date:
             query = query.filter(Transaction.created_at < end_date)
-            
+
         result = await db.execute(query)
         return result.scalar_one_or_none() or 0
 
@@ -87,6 +90,16 @@ async def get_earnings_overview(
     referral_rebate = await sum_earnings(types=[TransactionType.REFERRAL_REBATE])
     gift_earnings = await sum_earnings(types=[TransactionType.GIFT_REDEMPTION])
 
+    # WealthFund earnings: sum of both profit (WEALTH_FUND_MATURITY) and
+    # returned principal (WEALTH_FUND_PRINCIPAL_RETURN) so the caller can
+    # see the total amount credited from all matured funds.
+    wealthfund_earnings = await sum_earnings(
+        types=[
+            TransactionType.WEALTH_FUND_MATURITY,
+            TransactionType.WEALTH_FUND_PRINCIPAL_RETURN,
+        ]
+    )
+
     # Calculate total_commission as the sum of all specified transaction types
     total_commission = await sum_earnings()
 
@@ -99,4 +112,5 @@ async def get_earnings_overview(
         "referral_bonus": round(referral_bonus, 2),
         "referral_rebate": round(referral_rebate, 2),
         "gift_earnings": round(gift_earnings, 2),
+        "wealthfund_earnings": round(wealthfund_earnings, 2),
     }

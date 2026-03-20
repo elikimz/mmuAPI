@@ -95,12 +95,30 @@ async def complete_matured_funds(db: AsyncSession):
     Runs on a schedule.
     For each active fund whose end_date has passed:
       1. Calculate final payout = principal + total_profit
-      2. Credit payout to wallet.income  (atomic within the same DB session)
-      3. Record a WEALTH_FUND_MATURITY transaction for the income ledger
-      4. Mark the fund as 'completed' and zero out today_interest
+      2. Credit the FULL payout (principal + profit) to wallet.income
+      3. Record TWO separate transactions for a fully auditable ledger:
+           a. WEALTH_FUND_PRINCIPAL_RETURN  — the original investment amount
+              returned to the investor.
+           b. WEALTH_FUND_MATURITY          — the profit earned over the fund
+              duration.
+      4. Mark the fund as 'completed' and zero out today_interest.
+
+    Fix (Principal Not Credited — Root Cause):
+      Earlier versions of this function only recorded a single transaction
+      whose `amount` was set to `final_profit` (the profit alone), even though
+      `wallet.income` was correctly incremented by `final_payout` (principal +
+      profit).  This created a discrepancy between the wallet balance and the
+      transaction ledger: the principal was silently credited to the wallet but
+      never recorded as a transaction, making it invisible in earnings reports
+      and impossible to audit.
+
+      Fix: We now emit two explicit transaction records per matured fund —
+      one for the principal return and one for the profit — so that the sum of
+      all WEALTH_FUND_PRINCIPAL_RETURN and WEALTH_FUND_MATURITY transactions
+      always equals the total amount credited to wallet.income.
 
     Fix (Bug 2 & 3 — Idempotency / Race Condition):
-      - We now flush `fund.status = "completed"` for each fund *immediately*
+      - We flush `fund.status = "completed"` for each fund *immediately*
         after processing it (before moving to the next fund).  This prevents a
         second scheduler tick from re-processing the same fund if the first tick
         is still running.
@@ -154,7 +172,8 @@ async def complete_matured_funds(db: AsyncSession):
         # Use whichever is larger to avoid under-paying due to missed scheduler cycles.
         # But never exceed the contracted profit (expected_total_profit is already capped).
         final_profit = max(fresh_fund.total_profit, expected_total_profit)
-        final_payout = round(fresh_fund.amount + final_profit, 6)
+        principal = fresh_fund.amount
+        final_payout = round(principal + final_profit, 6)
 
         # ── 3. Mark fund as completed FIRST (idempotency guard) ──────────────
         # Flush the status change before crediting the wallet so that a
@@ -166,14 +185,24 @@ async def complete_matured_funds(db: AsyncSession):
         await db.flush()   # write to DB within the transaction, not yet committed
 
         # ── 4. Credit wallet (income section) ─────────────────────────────────
+        # Both the principal and the profit are credited to wallet.income.
+        # The investor's original capital is returned alongside the earned profit.
         wallet.income = round(wallet.income + final_payout, 6)
         db.add(wallet)
 
-        # ── 5. Record income transaction ─────────────────────────────────────
+        # ── 5. Record TWO separate income transactions ────────────────────────
+        # Transaction A: the principal (original investment) returned to the user.
+        db.add(Transaction(
+            user_id=fresh_fund.user_id,
+            type=TransactionType.WEALTH_FUND_PRINCIPAL_RETURN.value,
+            amount=round(principal, 6),
+            created_at=now,
+        ))
+        # Transaction B: the profit earned over the fund duration.
         db.add(Transaction(
             user_id=fresh_fund.user_id,
             type=TransactionType.WEALTH_FUND_MATURITY.value,
-            amount=final_payout,
+            amount=round(final_profit, 6),
             created_at=now,
         ))
 
@@ -186,7 +215,10 @@ async def complete_matured_funds(db: AsyncSession):
         processed += 1
         logger.info(
             f"Fund id={fresh_fund.id} matured for user_id={fresh_fund.user_id}. "
-            f"Payout={final_payout} (principal={fresh_fund.amount}, profit={final_profit})."
+            f"Total payout={final_payout} "
+            f"(principal={principal}, profit={final_profit}). "
+            f"Two transactions recorded: WEALTH_FUND_PRINCIPAL_RETURN={principal}, "
+            f"WEALTH_FUND_MATURITY={final_profit}."
         )
 
     if processed:

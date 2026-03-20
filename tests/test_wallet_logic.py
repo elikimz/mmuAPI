@@ -11,7 +11,8 @@ Business rules under test
                       * referral bonuses      (REFERRAL_BONUS)
                       * level-upgrade refunds (LEVEL_UPGRADE_REFUND)
                       * gift-code redemptions (GIFT_REDEMPTION)
-                      * wealth-fund maturity  (WEALTH_FUND_MATURITY)
+                      * wealth-fund profit    (WEALTH_FUND_MATURITY)
+                      * wealth-fund principal (WEALTH_FUND_PRINCIPAL_RETURN)
                       * withdrawal rejections (WITHDRAWAL_REJECTED_REFUND)
 
   wallet.balance  — is debited for level purchases and upgrades.
@@ -455,10 +456,16 @@ class TestGiftCodeRedemption:
 # ===========================================================================
 
 class TestWealthFundMaturity:
-    """When a wealth fund matures, the payout (principal + profit) goes to wallet.income."""
+    """
+    When a wealth fund matures, the full payout (principal + profit) goes to
+    wallet.income.  Two separate transaction records must be created:
+      - WEALTH_FUND_PRINCIPAL_RETURN for the original investment amount
+      - WEALTH_FUND_MATURITY         for the profit earned
+    """
 
     @pytest.mark.asyncio
     async def test_maturity_payout_credits_income(self, db):
+        """Legacy test: wallet.income receives the combined payout."""
         user, wallet = await make_user_and_wallet(db, balance=500.0, income=0.0)
         principal = 200.0
         profit = 36.0
@@ -478,6 +485,153 @@ class TestWealthFundMaturity:
 
         assert w.income == payout
         assert w.balance == 500.0, "Wealth fund maturity must not touch wallet.balance"
+
+    @pytest.mark.asyncio
+    async def test_maturity_creates_two_transactions(self, db):
+        """
+        Fix regression test: complete_matured_funds must emit TWO transaction
+        records — one for the principal return and one for the profit — so that
+        the ledger is fully auditable and the principal is not silently credited
+        without a corresponding transaction entry.
+        """
+        user, wallet = await make_user_and_wallet(db, balance=0.0, income=0.0)
+        principal = 500.0
+        profit = 90.0  # e.g. 0.9% daily * 20 days
+        payout = principal + profit
+
+        # Simulate what complete_matured_funds now does:
+        # credit the full payout to wallet.income ...
+        wallet.income = round(wallet.income + payout, 6)
+        db.add(wallet)
+
+        # ... and record TWO separate transactions.
+        now = datetime.utcnow()
+        db.add(Transaction(
+            user_id=user.id,
+            type=TransactionType.WEALTH_FUND_PRINCIPAL_RETURN.value,
+            amount=principal,
+            created_at=now,
+        ))
+        db.add(Transaction(
+            user_id=user.id,
+            type=TransactionType.WEALTH_FUND_MATURITY.value,
+            amount=profit,
+            created_at=now,
+        ))
+        await db.flush()
+
+        # Wallet income must equal the full payout.
+        result = await db.execute(select(Wallet).filter(Wallet.user_id == user.id))
+        w = result.scalar_one()
+        assert w.income == payout, (
+            f"wallet.income should be {payout} (principal + profit), got {w.income}"
+        )
+        assert w.balance == 0.0, "Maturity must not touch wallet.balance"
+
+        # There must be exactly two transactions for this user.
+        tx_result = await db.execute(
+            select(Transaction).filter(Transaction.user_id == user.id)
+        )
+        transactions = tx_result.scalars().all()
+        assert len(transactions) == 2, (
+            f"Expected 2 transactions (principal + profit), got {len(transactions)}"
+        )
+
+        tx_types = {tx.type for tx in transactions}
+        assert TransactionType.WEALTH_FUND_PRINCIPAL_RETURN.value in tx_types, (
+            "WEALTH_FUND_PRINCIPAL_RETURN transaction must be recorded"
+        )
+        assert TransactionType.WEALTH_FUND_MATURITY.value in tx_types, (
+            "WEALTH_FUND_MATURITY transaction must be recorded"
+        )
+
+        # The sum of both transaction amounts must equal the wallet credit.
+        tx_total = sum(tx.amount for tx in transactions)
+        assert round(tx_total, 6) == payout, (
+            f"Sum of transactions ({tx_total}) must equal wallet credit ({payout})"
+        )
+
+    @pytest.mark.asyncio
+    async def test_principal_transaction_amount_equals_investment(self, db):
+        """
+        The WEALTH_FUND_PRINCIPAL_RETURN transaction amount must exactly equal
+        the original investment (fund.amount), not the profit or the combined total.
+        """
+        user, wallet = await make_user_and_wallet(db, balance=0.0, income=0.0)
+        principal = 1000.0
+        profit = 180.0
+
+        wallet.income = round(wallet.income + principal + profit, 6)
+        db.add(wallet)
+        now = datetime.utcnow()
+        principal_tx = Transaction(
+            user_id=user.id,
+            type=TransactionType.WEALTH_FUND_PRINCIPAL_RETURN.value,
+            amount=principal,
+            created_at=now,
+        )
+        profit_tx = Transaction(
+            user_id=user.id,
+            type=TransactionType.WEALTH_FUND_MATURITY.value,
+            amount=profit,
+            created_at=now,
+        )
+        db.add(principal_tx)
+        db.add(profit_tx)
+        await db.flush()
+
+        tx_result = await db.execute(
+            select(Transaction).filter(
+                Transaction.user_id == user.id,
+                Transaction.type == TransactionType.WEALTH_FUND_PRINCIPAL_RETURN.value,
+            )
+        )
+        p_tx = tx_result.scalar_one()
+        assert p_tx.amount == principal, (
+            f"Principal return transaction amount should be {principal}, got {p_tx.amount}"
+        )
+
+        tx_result2 = await db.execute(
+            select(Transaction).filter(
+                Transaction.user_id == user.id,
+                Transaction.type == TransactionType.WEALTH_FUND_MATURITY.value,
+            )
+        )
+        m_tx = tx_result2.scalar_one()
+        assert m_tx.amount == profit, (
+            f"Maturity (profit) transaction amount should be {profit}, got {m_tx.amount}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_maturity_does_not_touch_balance(self, db):
+        """Neither the principal return nor the profit must ever touch wallet.balance."""
+        user, wallet = await make_user_and_wallet(db, balance=750.0, income=0.0)
+        principal = 300.0
+        profit = 54.0
+
+        wallet.income = round(wallet.income + principal + profit, 6)
+        db.add(wallet)
+        now = datetime.utcnow()
+        db.add(Transaction(
+            user_id=user.id,
+            type=TransactionType.WEALTH_FUND_PRINCIPAL_RETURN.value,
+            amount=principal,
+            created_at=now,
+        ))
+        db.add(Transaction(
+            user_id=user.id,
+            type=TransactionType.WEALTH_FUND_MATURITY.value,
+            amount=profit,
+            created_at=now,
+        ))
+        await db.flush()
+
+        result = await db.execute(select(Wallet).filter(Wallet.user_id == user.id))
+        w = result.scalar_one()
+        assert w.balance == 750.0, (
+            "wallet.balance must be unchanged after wealth fund maturity"
+        )
+        assert w.income == principal + profit
 
 
 # ===========================================================================
