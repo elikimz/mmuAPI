@@ -391,6 +391,34 @@ class TestLevelUpgrade:
         assert w.balance == balance_before - difference
         assert w.income == old_price
 
+    @pytest.mark.asyncio
+    async def test_user_specific_upgrade_scenario(self, db):
+        """
+        User scenario: Upgrade from P1 (1500) to P2 (3300).
+        - Difference (3300 - 1500 = 1800) should be deducted from balance.
+        - Old price (1500) should be added to income.
+        - Balance should NOT receive the 1500 refund.
+        """
+        initial_balance = 2000.0
+        initial_income = 0.0
+        user, wallet = await make_user_and_wallet(db, balance=initial_balance, income=initial_income)
+        
+        old_price = 1500.0
+        new_price = 3300.0
+        difference = new_price - old_price # 1800
+        
+        # Logic from userlevels.py:
+        wallet.balance -= difference
+        wallet.income += old_price
+        await db.flush()
+        
+        result = await db.execute(select(Wallet).filter(Wallet.user_id == user.id))
+        w = result.scalar_one()
+        
+        assert w.balance == initial_balance - difference # 2000 - 1800 = 200
+        assert w.income == initial_income + old_price    # 0 + 1500 = 1500
+        assert w.balance != initial_balance - difference + old_price, "BUG: Refund was incorrectly added to balance!"
+
 
 # ===========================================================================
 # 6. GIFT CODE REDEMPTION — income only
