@@ -277,11 +277,13 @@ async def upgrade_level(
     if level.earnest_money <= current_level.earnest_money:
         raise HTTPException(status_code=400, detail="You must upgrade to a higher-tier level")
 
-    difference = level.earnest_money - current_level.earnest_money
-    if wallet.balance < difference:
+    # To ensure balance only contains deposits and income contains all refunds,
+    # an upgrade is treated as a full purchase of the new level from balance
+    # followed by a full refund of the old level to income.
+    if wallet.balance < level.earnest_money:
         raise HTTPException(
             status_code=400,
-            detail=f"Insufficient balance. Required: {difference}, Available: {wallet.balance}"
+            detail=f"Insufficient balance. Required: {level.earnest_money}, Available: {wallet.balance}"
         )
 
     try:
@@ -290,14 +292,16 @@ async def upgrade_level(
         old_level_price = current_level.earnest_money
         now = datetime.utcnow()
 
-        wallet.balance -= difference
-        wallet.income += old_level_price  # Refund goes to income wallet
+        # Deduct full price of new level from balance
+        wallet.balance -= level.earnest_money
+        # Refund full price of old level to income
+        wallet.income += old_level_price
         
-        # Record upgrade cost
+        # Record upgrade cost (full price)
         db.add(Transaction(
             user_id=current_user.id,
             type=TransactionType.LEVEL_UPGRADE.value,
-            amount=difference,
+            amount=level.earnest_money,
             created_at=now
         ))
         

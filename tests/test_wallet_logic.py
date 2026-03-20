@@ -337,24 +337,28 @@ class TestLevelPurchase:
 class TestLevelUpgrade:
     """
     On upgrade:
-      - The price *difference* is deducted from wallet.balance.
+      - The FULL price of the new level is deducted from wallet.balance.
       - The old level's earnest_money is refunded to wallet.income.
     """
 
     @pytest.mark.asyncio
-    async def test_upgrade_deducts_difference_from_balance_and_refunds_to_income(self, db):
-        user, wallet = await make_user_and_wallet(db, balance=600.0, income=0.0)
+    async def test_upgrade_deducts_full_price_from_balance_and_refunds_to_income(self, db):
+        """
+        On upgrade:
+          - The FULL price of the new level is deducted from wallet.balance.
+          - The old level's earnest_money is refunded to wallet.income.
+        """
+        user, wallet = await make_user_and_wallet(db, balance=1000.0, income=0.0)
         old_price = 500.0
         new_price = 1000.0
-        difference = new_price - old_price  # 500
 
-        wallet.balance -= difference
+        wallet.balance -= new_price
         wallet.income += old_price  # Refund of old level price goes to income
 
         db.add(Transaction(
             user_id=user.id,
             type=TransactionType.LEVEL_UPGRADE.value,
-            amount=difference,
+            amount=new_price,
             created_at=datetime.utcnow(),
         ))
         db.add(Transaction(
@@ -368,19 +372,18 @@ class TestLevelUpgrade:
         result = await db.execute(select(Wallet).filter(Wallet.user_id == user.id))
         w = result.scalar_one()
 
-        assert w.balance == 100.0, "Upgrade must deduct the price difference from wallet.balance"
+        assert w.balance == 0.0, "Upgrade must deduct the full price from wallet.balance"
         assert w.income == 500.0, "Upgrade refund must credit wallet.income, not wallet.balance"
 
     @pytest.mark.asyncio
     async def test_upgrade_refund_never_goes_to_balance(self, db):
         """The old level's earnest_money refund must never go to wallet.balance."""
-        user, wallet = await make_user_and_wallet(db, balance=1000.0, income=0.0)
+        user, wallet = await make_user_and_wallet(db, balance=1500.0, income=0.0)
         old_price = 500.0
         new_price = 1500.0
-        difference = new_price - old_price
 
         balance_before = wallet.balance
-        wallet.balance -= difference
+        wallet.balance -= new_price
         wallet.income += old_price  # Refund to income (correct)
         await db.flush()
 
@@ -388,36 +391,35 @@ class TestLevelUpgrade:
         w = result.scalar_one()
 
         # balance should only reflect the deduction, not any refund
-        assert w.balance == balance_before - difference
+        assert w.balance == balance_before - new_price
         assert w.income == old_price
 
     @pytest.mark.asyncio
     async def test_user_specific_upgrade_scenario(self, db):
         """
         User scenario: Upgrade from P1 (1500) to P2 (3300).
-        - Difference (3300 - 1500 = 1800) should be deducted from balance.
+        - Full price (3300) should be deducted from balance.
         - Old price (1500) should be added to income.
         - Balance should NOT receive the 1500 refund.
         """
-        initial_balance = 2000.0
+        initial_balance = 3300.0
         initial_income = 0.0
         user, wallet = await make_user_and_wallet(db, balance=initial_balance, income=initial_income)
         
         old_price = 1500.0
         new_price = 3300.0
-        difference = new_price - old_price # 1800
         
         # Logic from userlevels.py:
-        wallet.balance -= difference
+        wallet.balance -= new_price
         wallet.income += old_price
         await db.flush()
         
         result = await db.execute(select(Wallet).filter(Wallet.user_id == user.id))
         w = result.scalar_one()
         
-        assert w.balance == initial_balance - difference # 2000 - 1800 = 200
-        assert w.income == initial_income + old_price    # 0 + 1500 = 1500
-        assert w.balance != initial_balance - difference + old_price, "BUG: Refund was incorrectly added to balance!"
+        assert w.balance == 0.0 # 3300 - 3300 = 0
+        assert w.income == 1500.0 # 0 + 1500 = 1500
+        assert w.balance != 1500.0, "BUG: Refund was incorrectly added to balance!"
 
 
 # ===========================================================================
