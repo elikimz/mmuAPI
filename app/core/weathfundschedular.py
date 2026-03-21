@@ -33,7 +33,7 @@ logger = logging.getLogger("mmuAPI.scheduler")
 scheduler = AsyncIOScheduler()
 
 # Allow the interval and startup delay to be tuned via environment variables
-_INTERVAL_MINUTES = int(os.getenv("WEALTHFUND_SCHEDULER_INTERVAL_MINUTES", "60"))
+_INTERVAL_MINUTES = int(os.getenv("WEALTHFUND_SCHEDULER_INTERVAL_MINUTES", "5"))
 _STARTUP_DELAY_SECONDS = int(os.getenv("WEALTHFUND_SCHEDULER_STARTUP_DELAY_SECONDS", "30"))
 
 

@@ -319,7 +319,86 @@ async def get_my_wealthfunds(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """Returns all WealthFund investments for the authenticated user, newest first."""
+    """Returns all WealthFund investments for the authenticated user, newest first.
+    Also triggers a lazy maturity check to ensure funds that have just matured
+    are processed immediately before returning the response."""
+    
+    # 1. Trigger a lazy maturity check for this user's funds
+    now = datetime.utcnow()
+    matured_result = await db.execute(
+        select(UserWealthFund)
+        .filter(UserWealthFund.user_id == user.id)
+        .filter(UserWealthFund.status == "active")
+        .filter(UserWealthFund.end_date <= now)
+    )
+    matured_funds = matured_result.scalars().all()
+    
+    if matured_funds:
+        # If there are matured funds, we process them immediately
+        # We can reuse the complete_matured_funds logic, but we need to do it inline
+        # to ensure it happens before we return the response
+        processed = False
+        for fund in matured_funds:
+            # Re-check status
+            fresh_result = await db.execute(
+                select(UserWealthFund).filter(UserWealthFund.id == fund.id)
+            )
+            fresh_fund = fresh_result.scalar_one_or_none()
+            if not fresh_fund or fresh_fund.status != "active":
+                continue
+                
+            # Fetch wallet
+            wallet_result = await db.execute(
+                select(Wallet).filter(Wallet.user_id == fresh_fund.user_id)
+            )
+            wallet = wallet_result.scalar_one_or_none()
+            if not wallet:
+                continue
+                
+            # Calculate final payout
+            expected_total_profit = round(
+                (fresh_fund.daily_interest / 100.0) * fresh_fund.amount * fresh_fund.duration_days, 6
+            )
+            final_profit = max(fresh_fund.total_profit, expected_total_profit)
+            principal = fresh_fund.amount
+            final_payout = round(principal + final_profit, 6)
+            
+            # Mark fund as completed
+            fresh_fund.status = "completed"
+            fresh_fund.total_profit = final_profit
+            fresh_fund.today_interest = 0.0
+            db.add(fresh_fund)
+            await db.flush()
+            
+            # Credit wallet
+            wallet.income = round(wallet.income + final_payout, 6)
+            db.add(wallet)
+            
+            # Record transactions
+            db.add(Transaction(
+                user_id=fresh_fund.user_id,
+                type=TransactionType.WEALTH_FUND_PRINCIPAL_RETURN.value,
+                amount=round(principal, 6),
+                created_at=now,
+            ))
+            db.add(Transaction(
+                user_id=fresh_fund.user_id,
+                type=TransactionType.WEALTH_FUND_MATURITY.value,
+                amount=round(final_profit, 6),
+                created_at=now,
+            ))
+            
+            processed = True
+            
+        if processed:
+            await db.commit()
+            # Invalidate cache
+            try:
+                await redis_cache.delete(f"user_profile_{user.id}")
+            except Exception:
+                pass
+
+    # 2. Return the updated list of funds
     result = await db.execute(
         select(UserWealthFund)
         .filter(UserWealthFund.user_id == user.id)
