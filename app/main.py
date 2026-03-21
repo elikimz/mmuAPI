@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from app.core.taskschedular import start_task_scheduler
 from app.core.weathfundschedular import start_scheduler
-from app.routers import auth,deposit,withdrawal,levels,task,userlevels,usertask,wealthfund,userweathfund,referals,profile,earnings,me,news,giftcode,spinwheel,cotacts,countdown,websocket
+from app.routers import auth,deposit,withdrawal,levels,task,userlevels,usertask,wealthfund,userweathfund,referals,profile,earnings,me,news,giftcode,spinwheel,cotacts,countdown,websocket,admin_dashboard
 
 # ─── Logging Configuration ───────────────────────────────────────────────────
 logging.basicConfig(
@@ -73,6 +73,7 @@ app.include_router(spinwheel.router)
 app.include_router(cotacts.router)
 app.include_router(countdown.router)
 app.include_router(websocket.router)
+app.include_router(admin_dashboard.router)
 
 
 
