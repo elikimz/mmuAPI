@@ -325,11 +325,13 @@
 
 
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
 from datetime import datetime, time, timedelta, timezone
+import io
+from fpdf import FPDF
 
 from passlib.context import CryptContext
 
@@ -343,6 +345,25 @@ from app.schema.schema import (
 )
 
 router = APIRouter(prefix="/withdrawals", tags=["Withdrawals"])
+
+class WithdrawalReceipt(FPDF):
+    def header(self):
+        # Company Branding
+        self.set_font('Arial', 'B', 20)
+        self.set_text_color(79, 70, 229) # Indigo color
+        self.cell(0, 10, 'MMU PLATFORM', 0, 1, 'C')
+        self.set_font('Arial', '', 10)
+        self.set_text_color(100, 116, 139)
+        self.cell(0, 5, 'Official Withdrawal Receipt', 0, 1, 'C')
+        self.ln(10)
+
+    def footer(self):
+        self.set_y(-30)
+        self.set_font('Arial', 'I', 8)
+        self.set_text_color(148, 163, 184)
+        self.cell(0, 5, 'This is a computer-generated receipt and does not require a signature.', 0, 1, 'C')
+        self.cell(0, 5, 'Thank you for using MMU Platform!', 0, 1, 'C')
+        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
 
 # -------------------------
 # CONFIG
@@ -550,3 +571,103 @@ async def get_my_withdrawals(
         select(Withdrawal).filter(Withdrawal.user_id == current_user.id)
     )
     return result.scalars().all()
+
+# -------------------------
+# USER: Download Receipt
+# -------------------------
+@router.get("/{withdrawal_id}/receipt")
+async def download_withdrawal_receipt(
+    withdrawal_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(
+        select(Withdrawal).filter(
+            Withdrawal.id == withdrawal_id,
+            Withdrawal.user_id == current_user.id
+        )
+    )
+    withdrawal = result.scalar_one_or_none()
+
+    if not withdrawal:
+        raise HTTPException(status_code=404, detail="Withdrawal not found")
+    
+    if withdrawal.status != "approved":
+        raise HTTPException(status_code=400, detail="Receipt only available for approved withdrawals")
+
+    # Create PDF
+    pdf = WithdrawalReceipt()
+    pdf.add_page()
+    
+    # Receipt Info Box
+    pdf.set_fill_color(248, 250, 252)
+    pdf.rect(10, 35, 190, 30, 'F')
+    
+    pdf.set_font('Arial', 'B', 12)
+    pdf.set_text_color(30, 41, 59)
+    pdf.set_xy(15, 40)
+    pdf.cell(90, 10, f'Receipt No: #WDR-{withdrawal.id:06d}')
+    pdf.set_xy(110, 40)
+    pdf.cell(90, 10, f'Date: {withdrawal.created_at.strftime("%Y-%m-%d %H:%M")}', 0, 0, 'R')
+    
+    pdf.set_font('Arial', '', 10)
+    pdf.set_xy(15, 50)
+    pdf.cell(90, 10, f'Status: {withdrawal.status.upper()}')
+    pdf.set_xy(110, 50)
+    pdf.cell(90, 10, f'User ID: {current_user.id}', 0, 0, 'R')
+    
+    pdf.ln(25)
+    
+    # Transaction Details Table Header
+    pdf.set_fill_color(79, 70, 229)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font('Arial', 'B', 10)
+    pdf.cell(130, 10, ' Description', 1, 0, 'L', True)
+    pdf.cell(60, 10, ' Amount (KES)', 1, 1, 'R', True)
+    
+    # Table Body
+    pdf.set_text_color(30, 41, 59)
+    pdf.set_font('Arial', '', 10)
+    
+    pdf.cell(130, 10, ' Withdrawal Amount (Gross)', 1, 0, 'L')
+    pdf.cell(60, 10, f' {withdrawal.amount:,.2f}', 1, 1, 'R')
+    
+    pdf.set_text_color(220, 38, 38) # Red for tax
+    pdf.cell(130, 10, ' Processing Tax (10%)', 1, 0, 'L')
+    pdf.cell(60, 10, f' -{withdrawal.tax:,.2f}', 1, 1, 'R')
+    
+    pdf.set_font('Arial', 'B', 11)
+    pdf.set_text_color(16, 185, 129) # Green for net
+    pdf.set_fill_color(240, 253, 244)
+    pdf.cell(130, 12, ' Net Amount Paid', 1, 0, 'L', True)
+    pdf.cell(60, 12, f' {withdrawal.net_amount:,.2f}', 1, 1, 'R', True)
+    
+    pdf.ln(10)
+    
+    # Recipient Details
+    pdf.set_text_color(71, 85, 105)
+    pdf.set_font('Arial', 'B', 10)
+    pdf.cell(0, 10, 'Recipient Details:', 0, 1, 'L')
+    pdf.set_font('Arial', '', 10)
+    pdf.cell(40, 8, 'Name:', 0, 0)
+    pdf.cell(0, 8, withdrawal.name, 0, 1)
+    pdf.cell(40, 8, 'M-Pesa Number:', 0, 0)
+    pdf.cell(0, 8, withdrawal.number, 0, 1)
+    
+    pdf.ln(15)
+    
+    # Security Note
+    pdf.set_font('Arial', '', 8)
+    pdf.set_text_color(100, 116, 139)
+    pdf.multi_cell(0, 5, 'Note: This withdrawal has been processed and sent to the registered M-Pesa number. If you have any issues, please contact support with the Receipt Number above.', 0, 'L')
+
+    # Output PDF to bytes
+    pdf_output = pdf.output(dest='S')
+    
+    return Response(
+        content=pdf_output,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=MMU_Receipt_WDR_{withdrawal.id}.pdf"
+        }
+    )
