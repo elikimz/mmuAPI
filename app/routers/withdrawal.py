@@ -630,18 +630,22 @@ async def download_withdrawal_receipt(
 
     # Output PDF to bytes
     try:
-        # In fpdf2, output() without arguments returns bytes
+        # In fpdf2, output() returns bytes or bytearray
         pdf_output = pdf.output()
         
-        # If it returns a string (old fpdf), convert to bytes
-        if isinstance(pdf_output, str):
+        # Ensure we have bytes for the Response
+        if isinstance(pdf_output, (bytearray, memoryview)):
+            pdf_output = bytes(pdf_output)
+        elif isinstance(pdf_output, str):
+            # Fallback for very old fpdf versions
             pdf_output = pdf_output.encode('latin-1')
             
         return Response(
             content=pdf_output,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f"attachment; filename=UKB_Receipt_WDR_{withdrawal.id}.pdf"
+                "Content-Disposition": f"attachment; filename=UKB_Receipt_WDR_{withdrawal.id}.pdf",
+                "Access-Control-Expose-Headers": "Content-Disposition"
             }
         )
     except Exception as e:
