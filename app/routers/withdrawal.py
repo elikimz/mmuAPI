@@ -21,6 +21,10 @@ from app.schema.schema import (
 )
 
 class WithdrawalReceipt(FPDF):
+    def __init__(self, serial_number=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.serial_number = serial_number
+
     def header(self):
         # UKB Logo
         logo_path = os.path.join(os.path.dirname(__file__), "..", "assets", "ukb_logo.png")
@@ -38,7 +42,21 @@ class WithdrawalReceipt(FPDF):
         self.set_text_color(100, 116, 139)
         self.set_xy(45, 18)
         self.cell(0, 10, 'Official Withdrawal Receipt', 0, 1, 'L')
-        self.ln(10)
+
+        # Unique Serial Number at the edge
+        if self.serial_number:
+            self.set_font('helvetica', 'B', 7)
+            self.set_text_color(148, 163, 184)
+            # Position at top right edge
+            self.set_xy(155, 8)
+            # Draw dotted box for serial number
+            self.dashed_line(155, 8, 205, 8, 0.5, 0.5)
+            self.dashed_line(155, 15, 205, 15, 0.5, 0.5)
+            self.dashed_line(155, 8, 155, 15, 0.5, 0.5)
+            self.dashed_line(205, 8, 205, 15, 0.5, 0.5)
+            self.cell(50, 7, f'SERIAL: {self.serial_number}', 0, 0, 'C')
+            
+        self.ln(15)
 
     def footer(self):
         self.set_y(-25)
@@ -227,8 +245,13 @@ async def download_receipt(
     if withdrawal.status != "approved":
         raise HTTPException(status_code=400, detail="Receipt only available for approved withdrawals")
     
+    # Generate Unique Serial Number
+    # Format: UKB-WDR-[ID]-[USER_ID]-[TIMESTAMP_SUFFIX]
+    timestamp_suffix = int(withdrawal.created_at.timestamp()) % 10000
+    serial_number = f"UKB-WDR-{withdrawal.id:04d}-{withdrawal.user_id:04d}-{timestamp_suffix:04d}"
+
     # Create PDF
-    pdf = WithdrawalReceipt()
+    pdf = WithdrawalReceipt(serial_number=serial_number)
     pdf.add_page()
     
     # Receipt Details Box
