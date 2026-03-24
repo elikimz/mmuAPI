@@ -5,8 +5,8 @@ from typing import List, Optional
 from datetime import datetime
 
 from app.database.database import get_async_db
-from app.models.models import AppContact
-
+from app.models.models import AppContact, User
+from app.routers.auth import get_current_admin
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/app-contacts", tags=["App Contacts"])
@@ -34,15 +34,19 @@ class AppContactOut(BaseModel):
     customer_link: Optional[str]
     created_at: datetime
 
-    model_config = {"from_attributes": True}  # for SQLAlchemy async
+    model_config = {"from_attributes": True}
 
 # ==========================
 # Routes
 # ==========================
 
-# Create
+# Create (Admin only)
 @router.post("/", response_model=AppContactOut)
-async def create_contact(contact: AppContactCreate, db: AsyncSession = Depends(get_async_db)):
+async def create_contact(
+    contact: AppContactCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_admin: User = Depends(get_current_admin),
+):
     new_contact = AppContact(**contact.dict())
     db.add(new_contact)
     await db.commit()
@@ -65,9 +69,14 @@ async def get_contact(contact_id: int, db: AsyncSession = Depends(get_async_db))
         raise HTTPException(status_code=404, detail="Contact not found")
     return contact
 
-# Update
+# Update (Admin only)
 @router.put("/{contact_id}", response_model=AppContactOut)
-async def update_contact(contact_id: int, updated_data: AppContactUpdate, db: AsyncSession = Depends(get_async_db)):
+async def update_contact(
+    contact_id: int,
+    updated_data: AppContactUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    current_admin: User = Depends(get_current_admin),
+):
     result = await db.execute(select(AppContact).filter(AppContact.id == contact_id))
     contact = result.scalar_one_or_none()
     if not contact:
@@ -81,9 +90,13 @@ async def update_contact(contact_id: int, updated_data: AppContactUpdate, db: As
     await db.refresh(contact)
     return contact
 
-# Delete
+# Delete (Admin only)
 @router.delete("/{contact_id}")
-async def delete_contact(contact_id: int, db: AsyncSession = Depends(get_async_db)):
+async def delete_contact(
+    contact_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_admin: User = Depends(get_current_admin),
+):
     result = await db.execute(select(AppContact).filter(AppContact.id == contact_id))
     contact = result.scalar_one_or_none()
     if not contact:
