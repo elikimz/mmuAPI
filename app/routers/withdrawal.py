@@ -349,17 +349,17 @@ router = APIRouter(prefix="/withdrawals", tags=["Withdrawals"])
 class WithdrawalReceipt(FPDF):
     def header(self):
         # Company Branding
-        self.set_font('Arial', 'B', 20)
+        self.set_font('helvetica', 'B', 20)
         self.set_text_color(79, 70, 229) # Indigo color
         self.cell(0, 10, 'UKB PLATFORM', 0, 1, 'C')
-        self.set_font('Arial', '', 10)
+        self.set_font('helvetica', '', 10)
         self.set_text_color(100, 116, 139)
         self.cell(0, 5, 'Official Withdrawal Receipt', 0, 1, 'C')
         self.ln(10)
 
     def footer(self):
         self.set_y(-30)
-        self.set_font('Arial', 'I', 8)
+        self.set_font('helvetica', 'I', 8)
         self.set_text_color(148, 163, 184)
         self.cell(0, 5, 'This is a computer-generated receipt and does not require a signature.', 0, 1, 'C')
         self.cell(0, 5, 'Thank you for using UKB Platform!', 0, 1, 'C')
@@ -603,14 +603,14 @@ async def download_withdrawal_receipt(
     pdf.set_fill_color(248, 250, 252)
     pdf.rect(10, 35, 190, 30, 'F')
     
-    pdf.set_font('Arial', 'B', 12)
+    pdf.set_font('helvetica', 'B', 12)
     pdf.set_text_color(30, 41, 59)
     pdf.set_xy(15, 40)
     pdf.cell(90, 10, f'Receipt No: #WDR-{withdrawal.id:06d}')
     pdf.set_xy(110, 40)
     pdf.cell(90, 10, f'Date: {withdrawal.created_at.strftime("%Y-%m-%d %H:%M")}', 0, 0, 'R')
     
-    pdf.set_font('Arial', '', 10)
+    pdf.set_font('helvetica', '', 10)
     pdf.set_xy(15, 50)
     pdf.cell(90, 10, f'Status: {withdrawal.status.upper()}')
     pdf.set_xy(110, 50)
@@ -621,13 +621,13 @@ async def download_withdrawal_receipt(
     # Transaction Details Table Header
     pdf.set_fill_color(79, 70, 229)
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font('Arial', 'B', 10)
+    pdf.set_font('helvetica', 'B', 10)
     pdf.cell(130, 10, ' Description', 1, 0, 'L', True)
     pdf.cell(60, 10, ' Amount (KES)', 1, 1, 'R', True)
     
     # Table Body
     pdf.set_text_color(30, 41, 59)
-    pdf.set_font('Arial', '', 10)
+    pdf.set_font('helvetica', '', 10)
     
     pdf.cell(130, 10, ' Withdrawal Amount (Gross)', 1, 0, 'L')
     pdf.cell(60, 10, f' {withdrawal.amount:,.2f}', 1, 1, 'R')
@@ -636,7 +636,7 @@ async def download_withdrawal_receipt(
     pdf.cell(130, 10, ' Processing Tax (10%)', 1, 0, 'L')
     pdf.cell(60, 10, f' -{withdrawal.tax:,.2f}', 1, 1, 'R')
     
-    pdf.set_font('Arial', 'B', 11)
+    pdf.set_font('helvetica', 'B', 11)
     pdf.set_text_color(16, 185, 129) # Green for net
     pdf.set_fill_color(240, 253, 244)
     pdf.cell(130, 12, ' Net Amount Paid', 1, 0, 'L', True)
@@ -646,9 +646,9 @@ async def download_withdrawal_receipt(
     
     # Recipient Details
     pdf.set_text_color(71, 85, 105)
-    pdf.set_font('Arial', 'B', 10)
+    pdf.set_font('helvetica', 'B', 10)
     pdf.cell(0, 10, 'Recipient Details:', 0, 1, 'L')
-    pdf.set_font('Arial', '', 10)
+    pdf.set_font('helvetica', '', 10)
     pdf.cell(40, 8, 'Name:', 0, 0)
     pdf.cell(0, 8, withdrawal.name, 0, 1)
     pdf.cell(40, 8, 'M-Pesa Number:', 0, 0)
@@ -657,17 +657,28 @@ async def download_withdrawal_receipt(
     pdf.ln(15)
     
     # Security Note
-    pdf.set_font('Arial', '', 8)
+    pdf.set_font('helvetica', '', 8)
     pdf.set_text_color(100, 116, 139)
     pdf.multi_cell(0, 5, 'Note: This withdrawal has been processed and sent to the registered M-Pesa number. If you have any issues, please contact support with the Receipt Number above.', 0, 'L')
 
     # Output PDF to bytes
-    pdf_output = pdf.output(dest='S')
-    
-    return Response(
-        content=pdf_output,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f"attachment; filename=UKB_Receipt_WDR_{withdrawal.id}.pdf"
-        }
-    )
+    try:
+        # In fpdf2, output() without arguments returns bytes
+        pdf_output = pdf.output()
+        
+        # If it returns a string (old fpdf), convert to bytes
+        if isinstance(pdf_output, str):
+            pdf_output = pdf_output.encode('latin-1')
+            
+        return Response(
+            content=pdf_output,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=UKB_Receipt_WDR_{withdrawal.id}.pdf"
+            }
+        )
+    except Exception as e:
+        import traceback
+        from app.main import logger
+        logger.error(f"PDF Generation Error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
