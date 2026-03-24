@@ -34,7 +34,8 @@ app.add_middleware(
 # ─── Global Exception Handlers ───────────────────────────────────────────────
 @app.exception_handler(SQLAlchemyError)
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
-    logger.error(f"Database error on {request.method} {request.url}: {exc}")
+    method = getattr(request, "method", "WS")
+    logger.error(f"Database error on {method} {request.url}: {exc}")
     return JSONResponse(
         status_code=500,
         content={"detail": "A database error occurred. Please try again later."},
