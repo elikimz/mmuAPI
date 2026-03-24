@@ -596,70 +596,37 @@ async def download_withdrawal_receipt(
         raise HTTPException(status_code=400, detail="Receipt only available for approved withdrawals")
 
     # Create PDF
-    pdf = WithdrawalReceipt()
+    pdf = FPDF()
     pdf.add_page()
-    
-    # Receipt Info Box
-    pdf.set_fill_color(248, 250, 252)
-    pdf.rect(10, 35, 190, 30, 'F')
-    
-    pdf.set_font('helvetica', 'B', 12)
-    pdf.set_text_color(30, 41, 59)
-    pdf.set_xy(15, 40)
-    pdf.cell(90, 10, f'Receipt No: #WDR-{withdrawal.id:06d}')
-    pdf.set_xy(110, 40)
-    pdf.cell(90, 10, f'Date: {withdrawal.created_at.strftime("%Y-%m-%d %H:%M")}', 0, 0, 'R')
-    
-    pdf.set_font('helvetica', '', 10)
-    pdf.set_xy(15, 50)
-    pdf.cell(90, 10, f'Status: {withdrawal.status.upper()}')
-    pdf.set_xy(110, 50)
-    pdf.cell(90, 10, f'User ID: {current_user.id}', 0, 0, 'R')
-    
-    pdf.ln(25)
-    
-    # Transaction Details Table Header
-    pdf.set_fill_color(79, 70, 229)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font('helvetica', 'B', 10)
-    pdf.cell(130, 10, ' Description', 1, 0, 'L', True)
-    pdf.cell(60, 10, ' Amount (KES)', 1, 1, 'R', True)
-    
-    # Table Body
-    pdf.set_text_color(30, 41, 59)
-    pdf.set_font('helvetica', '', 10)
-    
-    pdf.cell(130, 10, ' Withdrawal Amount (Gross)', 1, 0, 'L')
-    pdf.cell(60, 10, f' {withdrawal.amount:,.2f}', 1, 1, 'R')
-    
-    pdf.set_text_color(220, 38, 38) # Red for tax
-    pdf.cell(130, 10, ' Processing Tax (10%)', 1, 0, 'L')
-    pdf.cell(60, 10, f' -{withdrawal.tax:,.2f}', 1, 1, 'R')
-    
-    pdf.set_font('helvetica', 'B', 11)
-    pdf.set_text_color(16, 185, 129) # Green for net
-    pdf.set_fill_color(240, 253, 244)
-    pdf.cell(130, 12, ' Net Amount Paid', 1, 0, 'L', True)
-    pdf.cell(60, 12, f' {withdrawal.net_amount:,.2f}', 1, 1, 'R', True)
-    
+    pdf.set_font('helvetica', 'B', 16)
+    pdf.cell(0, 10, 'UKB PLATFORM RECEIPT', 0, 1, 'C')
     pdf.ln(10)
     
-    # Recipient Details
-    pdf.set_text_color(71, 85, 105)
-    pdf.set_font('helvetica', 'B', 10)
-    pdf.cell(0, 10, 'Recipient Details:', 0, 1, 'L')
-    pdf.set_font('helvetica', '', 10)
-    pdf.cell(40, 8, 'Name:', 0, 0)
-    pdf.cell(0, 8, withdrawal.name, 0, 1)
-    pdf.cell(40, 8, 'M-Pesa Number:', 0, 0)
-    pdf.cell(0, 8, withdrawal.number, 0, 1)
+    pdf.set_font('helvetica', '', 12)
+    pdf.cell(50, 10, f'Receipt No:', 0, 0)
+    pdf.cell(0, 10, f'#WDR-{withdrawal.id:06d}', 0, 1)
+    pdf.cell(50, 10, f'Date:', 0, 0)
+    pdf.cell(0, 10, f'{withdrawal.created_at.strftime("%Y-%m-%d %H:%M")}', 0, 1)
+    pdf.cell(50, 10, f'Status:', 0, 0)
+    pdf.cell(0, 10, f'{withdrawal.status.upper()}', 0, 1)
     
-    pdf.ln(15)
+    pdf.ln(10)
+    pdf.cell(50, 10, f'Gross Amount:', 0, 0)
+    pdf.cell(0, 10, f'KES {withdrawal.amount:,.2f}', 0, 1)
+    pdf.cell(50, 10, f'Tax (10%):', 0, 0)
+    pdf.cell(0, 10, f'KES {withdrawal.tax:,.2f}', 0, 1)
+    pdf.cell(50, 10, f'Net Paid:', 0, 0)
+    pdf.cell(0, 10, f'KES {withdrawal.net_amount:,.2f}', 0, 1)
     
-    # Security Note
-    pdf.set_font('helvetica', '', 8)
-    pdf.set_text_color(100, 116, 139)
-    pdf.multi_cell(0, 5, 'Note: This withdrawal has been processed and sent to the registered M-Pesa number. If you have any issues, please contact support with the Receipt Number above.', 0, 'L')
+    pdf.ln(10)
+    pdf.cell(50, 10, f'Recipient:', 0, 0)
+    pdf.cell(0, 10, f'{withdrawal.name}', 0, 1)
+    pdf.cell(50, 10, f'M-Pesa:', 0, 0)
+    pdf.cell(0, 10, f'{withdrawal.number}', 0, 1)
+    
+    pdf.ln(20)
+    pdf.set_font('helvetica', 'I', 10)
+    pdf.cell(0, 10, 'Thank you for using UKB Platform!', 0, 1, 'C')
 
     # Output PDF to bytes
     try:
