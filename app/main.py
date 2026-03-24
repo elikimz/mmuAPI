@@ -13,11 +13,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("mmuAPI")
+logger = logging.getLogger("ukbAPI")
 
 app = FastAPI(
-    title="MMU API",
-    description="MMU Platform Backend API",
+    title="UKB API",
+    description="UKB Platform Backend API",
     version="1.0.0",
 )
 
@@ -83,7 +83,7 @@ async def root():
 
 @app.on_event("startup")
 async def on_startup():
-    logger.info("Starting MMU API...")
+    logger.info("Starting UKB API...")
     try:
         from app.core.redis_cache import cache
         await cache.connect()
@@ -100,11 +100,11 @@ async def on_startup():
         logger.info("Task scheduler started.")
     except Exception as e:
         logger.error(f"Failed to start task scheduler: {e}")
-    logger.info("MMU API startup complete.")
+    logger.info("UKB API startup complete.")
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    logger.info("Shutting down MMU API...")
+    logger.info("Shutting down UKB API...")
     try:
         from app.core.redis_cache import cache
         await cache.close()

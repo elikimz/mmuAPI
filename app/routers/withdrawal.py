@@ -351,7 +351,7 @@ class WithdrawalReceipt(FPDF):
         # Company Branding
         self.set_font('Arial', 'B', 20)
         self.set_text_color(79, 70, 229) # Indigo color
-        self.cell(0, 10, 'MMU PLATFORM', 0, 1, 'C')
+        self.cell(0, 10, 'UKB PLATFORM', 0, 1, 'C')
         self.set_font('Arial', '', 10)
         self.set_text_color(100, 116, 139)
         self.cell(0, 5, 'Official Withdrawal Receipt', 0, 1, 'C')
@@ -362,7 +362,7 @@ class WithdrawalReceipt(FPDF):
         self.set_font('Arial', 'I', 8)
         self.set_text_color(148, 163, 184)
         self.cell(0, 5, 'This is a computer-generated receipt and does not require a signature.', 0, 1, 'C')
-        self.cell(0, 5, 'Thank you for using MMU Platform!', 0, 1, 'C')
+        self.cell(0, 5, 'Thank you for using UKB Platform!', 0, 1, 'C')
         self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
 
 # -------------------------
@@ -668,6 +668,6 @@ async def download_withdrawal_receipt(
         content=pdf_output,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"attachment; filename=MMU_Receipt_WDR_{withdrawal.id}.pdf"
+            "Content-Disposition": f"attachment; filename=UKB_Receipt_WDR_{withdrawal.id}.pdf"
         }
     )
