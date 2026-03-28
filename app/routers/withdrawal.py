@@ -19,8 +19,6 @@ from app.schema.schema import (
     WithdrawalResponse,
     WithdrawalUpdateStatus,
 )
-from app.core.redis_cache import cache
-
 class WithdrawalReceipt(FPDF):
     def __init__(self, serial_number=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -150,9 +148,13 @@ async def create_withdrawal(
 
     # Invalidate profile cache
     try:
+        from app.core.redis_cache import cache
         await cache.delete(f"user_profile_{current_user.id}")
     except Exception as e:
-        print(f"Cache invalidation error: {e}")
+        # Log the error but don't fail the request
+        import traceback
+        print(f"Cache invalidation error for user {current_user.id}: {e}")
+        print(traceback.format_exc())
     
     return new_withdrawal
 
