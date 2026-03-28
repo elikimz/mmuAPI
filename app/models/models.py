@@ -334,6 +334,7 @@ class Transaction(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     type = Column(String, nullable=False)  # Use TransactionType enum values
     amount = Column(Float, nullable=False)
+    description = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="transactions")
