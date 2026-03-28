@@ -105,17 +105,22 @@ async def create_withdrawal(
     if not verify_pin(withdrawal_data.pin, current_user.withdrawal_pin):
         raise HTTPException(status_code=400, detail="Invalid withdrawal PIN")
 
-    # 3. Check balance
+    # 3. Check balance (Withdrawal from income only)
     result = await db.execute(select(Wallet).where(Wallet.user_id == current_user.id))
     wallet = result.scalar_one_or_none()
-    
-    if not wallet or wallet.balance < withdrawal_data.amount:
-        raise HTTPException(status_code=400, detail="Insufficient balance")
+
+    available_income = wallet.income if wallet else 0.0
+
+    if not wallet or available_income < withdrawal_data.amount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient withdrawable income. Available: KES {available_income:,.2f}"
+        )
 
     # 4. Create withdrawal record
     tax = withdrawal_data.amount * TAX_RATE
     net_amount = withdrawal_data.amount - tax
-    
+
     new_withdrawal = Withdrawal(
         user_id=current_user.id,
         name=withdrawal_data.name,
@@ -125,9 +130,9 @@ async def create_withdrawal(
         net_amount=net_amount,
         status="pending"
     )
-    
-    # 5. Deduct from wallet and create transaction
-    wallet.balance -= withdrawal_data.amount
+
+    # 5. Deduct from wallet income
+    wallet.income -= withdrawal_data.amount
     
     transaction = Transaction(
         user_id=current_user.id,
@@ -198,12 +203,12 @@ async def update_withdrawal_status(
     if transaction:
         transaction.status = status_data.status
         
-    # If rejected, refund the wallet
+    # If rejected, refund the wallet (return to income since that is the primary source)
     if status_data.status == "rejected":
         wallet_result = await db.execute(select(Wallet).where(Wallet.user_id == withdrawal.user_id))
         wallet = wallet_result.scalar_one_or_none()
         if wallet:
-            wallet.balance += withdrawal.amount
+            wallet.income += withdrawal.amount
             
     await db.commit()
     await db.refresh(withdrawal)
