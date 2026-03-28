@@ -13,7 +13,7 @@ from passlib.context import CryptContext
 
 from app.models.models import User, Withdrawal, Wallet, Transaction
 from app.database.database import get_async_db
-from app.routers.auth import get_current_user, get_current_admin
+from app.routers.auth import get_current_user, get_current_admin, verify_pin
 from app.schema.schema import (
     WithdrawalCreate,
     WithdrawalResponse,
@@ -80,11 +80,9 @@ KENYA_TZ = timezone(timedelta(hours=3))  # UTC+3
 # -------------------------
 # UTILS
 # -------------------------
-def verify_pin(plain_pin, hashed_pin):
-    return pwd_context_pin.verify(plain_pin, hashed_pin)
-
 def get_hashed_pin(pin):
-    return pwd_context_pin.hash(pin)
+    from app.routers.auth import hash_pin
+    return hash_pin(pin)
 
 # -------------------------
 # ROUTES
