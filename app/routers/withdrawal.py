@@ -146,6 +146,13 @@ async def create_withdrawal(
     db.add(transaction)
     await db.commit()
     await db.refresh(new_withdrawal)
+
+    # Invalidate profile cache
+    try:
+        from app.core.redis_cache import cache
+        await cache.delete(f"user_profile_{current_user.id}")
+    except Exception as e:
+        print(f"Cache invalidation error: {e}")
     
     return new_withdrawal
 
