@@ -135,8 +135,9 @@ async def create_withdrawal(
         user_id=current_user.id,
         amount=withdrawal_data.amount,
         type="withdrawal",
-        description=f"Withdrawal request of KES {withdrawal_data.amount}",
         status="pending"
+        # description=f"Withdrawal request of KES {withdrawal_data.amount}",
+      
     )
     
     db.add(new_withdrawal)
