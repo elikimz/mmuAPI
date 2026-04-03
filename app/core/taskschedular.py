@@ -229,13 +229,21 @@ def start_task_scheduler():
     """
     scheduler = AsyncIOScheduler(timezone=KENYA_TZ)
 
+    # Delay the first run of interval jobs to avoid startup race conditions
+    import os
+    startup_delay = int(os.getenv("TASK_SCHEDULER_STARTUP_DELAY_SECONDS", "30"))
+    first_run_time = datetime.now(KENYA_TZ) + timedelta(seconds=startup_delay)
+
     # 1. Level expiry check every 5 minutes
     scheduler.add_job(
         expire_user_levels,
         trigger="interval",
         minutes=5,
+        next_run_time=first_run_time,
         id="level_expiry_check",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
 
     # 2. Daily task reset at midnight EAT
@@ -247,10 +255,12 @@ def start_task_scheduler():
         second=0,
         id="daily_task_reset",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
 
     scheduler.start()
     print(
         f"[{datetime.now(KENYA_TZ)}] Scheduler started: "
-        f"Level Expiry (every 5 min) & Daily Reset (00:00 EAT, active levels only)."
+        f"Level Expiry (every 5 min, first run in {startup_delay}s) & Daily Reset (00:00 EAT, active levels only)."
     )
