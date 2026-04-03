@@ -13,13 +13,12 @@ from passlib.context import CryptContext
 
 from app.models.models import User, Withdrawal, Wallet, Transaction
 from app.database.database import get_async_db
-from app.routers.auth import get_current_user, get_current_admin
+from app.routers.auth import get_current_user, get_current_admin, verify_pin
 from app.schema.schema import (
     WithdrawalCreate,
     WithdrawalResponse,
     WithdrawalUpdateStatus,
 )
-
 class WithdrawalReceipt(FPDF):
     def __init__(self, serial_number=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -81,11 +80,9 @@ KENYA_TZ = timezone(timedelta(hours=3))  # UTC+3
 # -------------------------
 # UTILS
 # -------------------------
-def verify_pin(plain_pin, hashed_pin):
-    return pwd_context_pin.verify(plain_pin, hashed_pin)
-
 def get_hashed_pin(pin):
-    return pwd_context_pin.hash(pin)
+    from app.routers.auth import hash_pin
+    return hash_pin(pin)
 
 # -------------------------
 # ROUTES
@@ -105,17 +102,22 @@ async def create_withdrawal(
     if not verify_pin(withdrawal_data.pin, current_user.withdrawal_pin):
         raise HTTPException(status_code=400, detail="Invalid withdrawal PIN")
 
-    # 3. Check balance
+    # 3. Check balance (Withdrawal from income only)
     result = await db.execute(select(Wallet).where(Wallet.user_id == current_user.id))
     wallet = result.scalar_one_or_none()
-    
-    if not wallet or wallet.balance < withdrawal_data.amount:
-        raise HTTPException(status_code=400, detail="Insufficient balance")
+
+    available_income = wallet.income if wallet else 0.0
+
+    if not wallet or available_income < withdrawal_data.amount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient withdrawable income. Available: KES {available_income:,.2f}"
+        )
 
     # 4. Create withdrawal record
     tax = withdrawal_data.amount * TAX_RATE
     net_amount = withdrawal_data.amount - tax
-    
+
     new_withdrawal = Withdrawal(
         user_id=current_user.id,
         name=withdrawal_data.name,
@@ -125,9 +127,9 @@ async def create_withdrawal(
         net_amount=net_amount,
         status="pending"
     )
-    
-    # 5. Deduct from wallet and create transaction
-    wallet.balance -= withdrawal_data.amount
+
+    # 5. Deduct from wallet income
+    wallet.income -= withdrawal_data.amount
     
     transaction = Transaction(
         user_id=current_user.id,
@@ -135,12 +137,24 @@ async def create_withdrawal(
         type="withdrawal",
         description=f"Withdrawal request of KES {withdrawal_data.amount}",
         status="pending"
+       
+      
     )
     
     db.add(new_withdrawal)
     db.add(transaction)
     await db.commit()
     await db.refresh(new_withdrawal)
+
+    # Invalidate profile cache
+    try:
+        from app.core.redis_cache import cache
+        await cache.delete(f"user_profile_{current_user.id}")
+    except Exception as e:
+        # Log the error but don't fail the request
+        import traceback
+        print(f"Cache invalidation error for user {current_user.id}: {e}")
+        print(traceback.format_exc())
     
     return new_withdrawal
 
@@ -198,12 +212,12 @@ async def update_withdrawal_status(
     if transaction:
         transaction.status = status_data.status
         
-    # If rejected, refund the wallet
+    # If rejected, refund the wallet (return to income since that is the primary source)
     if status_data.status == "rejected":
         wallet_result = await db.execute(select(Wallet).where(Wallet.user_id == withdrawal.user_id))
         wallet = wallet_result.scalar_one_or_none()
         if wallet:
-            wallet.balance += withdrawal.amount
+            wallet.income += withdrawal.amount
             
     await db.commit()
     await db.refresh(withdrawal)
