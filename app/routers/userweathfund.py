@@ -51,40 +51,42 @@ async def update_daily_interest(db: AsyncSession):
     active_funds = result.scalars().all()
 
     updated_count = 0
-    for fund in active_funds:
-        # Determine the last date on which interest was credited (convert to Kenya time)
-        last_update_dt_utc = fund.last_interest_update or fund.start_date
-        last_update_dt_kenya = last_update_dt_utc + kenya_offset
-        last_update_date_kenya = last_update_dt_kenya.date()
+    # Process in batches to avoid holding too many objects in memory and long transactions
+    BATCH_SIZE = 50
+    for i in range(0, len(active_funds), BATCH_SIZE):
+        batch = active_funds[i:i + BATCH_SIZE]
+        for fund in batch:
+            # Determine the last date on which interest was credited (convert to Kenya time)
+            last_update_dt_utc = fund.last_interest_update or fund.start_date
+            last_update_dt_kenya = last_update_dt_utc + kenya_offset
+            last_update_date_kenya = last_update_dt_kenya.date()
 
-        # Number of full Kenya calendar days that have elapsed since last accrual
-        days_to_accrue = (today_kenya - last_update_date_kenya).days
+            # Number of full Kenya calendar days that have elapsed since last accrual
+            days_to_accrue = (today_kenya - last_update_date_kenya).days
 
-        if days_to_accrue <= 0:
-            # Already accrued today — skip
-            continue
+            if days_to_accrue <= 0:
+                # Already accrued today — skip
+                continue
 
-        # Calculate daily gain: daily_interest is stored as a percentage (e.g. 0.9 means 0.9%)
-        daily_gain = round((fund.daily_interest / 100.0) * fund.amount, 6)
+            # Calculate daily gain: daily_interest is stored as a percentage (e.g. 0.9 means 0.9%)
+            daily_gain = round((fund.daily_interest / 100.0) * fund.amount, 6)
 
-        # Credit all missed days (catch-up for scheduler downtime)
-        total_gain = round(daily_gain * days_to_accrue, 6)
+            # Credit all missed days (catch-up for scheduler downtime)
+            total_gain = round(daily_gain * days_to_accrue, 6)
 
-        fund.today_interest = daily_gain          # today's single-day gain
-        fund.total_profit = round(fund.total_profit + total_gain, 6)
-        fund.last_interest_update = now_utc
-        updated_count += 1
+            fund.today_interest = daily_gain          # today's single-day gain
+            fund.total_profit = round(fund.total_profit + total_gain, 6)
+            fund.last_interest_update = now_utc
+            updated_count += 1
 
-        logger.info(
-            f"Accrued KES {total_gain} interest for fund {fund.id} "
-            f"(user {fund.user_id}, {days_to_accrue} day(s) @ KES {daily_gain}/day)"
-        )
+        # Commit each batch to keep transactions short
+        if updated_count > 0:
+            await db.commit()
 
     if updated_count > 0:
-        await db.commit()
         logger.info(f"Daily interest update cycle complete. {updated_count} fund(s) updated.")
     else:
-        logger.info("Daily interest update cycle: no funds required accrual.")
+        logger.info("Daily daily interest update cycle: no funds required accrual.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -141,88 +143,83 @@ async def complete_matured_funds(db: AsyncSession):
     matured_funds = result.scalars().all()
 
     processed = 0
-    for fund in matured_funds:
-        # ── Re-check status (guard against concurrent scheduler runs) ────────
-        # Re-read the fund inside the loop to get the freshest status.
-        fresh_result = await db.execute(
-            select(UserWealthFund).filter(UserWealthFund.id == fund.id)
-        )
-        fresh_fund = fresh_result.scalar_one_or_none()
-        if not fresh_fund or fresh_fund.status != "active":
-            logger.info(f"Fund id={fund.id} already processed — skipping.")
-            continue
-
-        # ── 1. Fetch wallet ──────────────────────────────────────────────────
+    # Process in small batches to avoid long-lived transactions and connection holding
+    BATCH_SIZE = 20
+    for i in range(0, len(matured_funds), BATCH_SIZE):
+        batch = matured_funds[i:i + BATCH_SIZE]
+        
+        # Pre-fetch wallets for the batch to avoid N+1 queries
+        user_ids = [f.user_id for f in batch]
         wallet_result = await db.execute(
-            select(Wallet).filter(Wallet.user_id == fresh_fund.user_id)
+            select(Wallet).filter(Wallet.user_id.in_(user_ids))
         )
-        wallet = wallet_result.scalar_one_or_none()
-        if not wallet:
-            logger.warning(
-                f"Wallet not found for user_id={fresh_fund.user_id} "
-                f"(fund id={fresh_fund.id}). Skipping."
+        wallets = {w.user_id: w for w in wallet_result.scalars().all()}
+
+        for fund in batch:
+            # ── Re-check status (guard against concurrent scheduler runs) ────────
+            # We use the object from the initial query which is already in the session
+            if fund.status != "active":
+                logger.info(f"Fund id={fund.id} already processed — skipping.")
+                continue
+
+            # ── 1. Get wallet from pre-fetched dict ──────────────────────────────
+            wallet = wallets.get(fund.user_id)
+            if not wallet:
+                logger.warning(
+                    f"Wallet not found for user_id={fund.user_id} "
+                    f"(fund id={fund.id}). Skipping."
+                )
+                continue
+
+            # ── 2. Calculate final payout ────────────────────────────────────────
+            expected_total_profit = round(
+                (fund.daily_interest / 100.0) * fund.amount * fund.duration_days, 6
             )
-            continue
+            final_profit = max(fund.total_profit, expected_total_profit)
+            principal = fund.amount
+            final_payout = round(principal + final_profit, 6)
 
-        # ── 2. Calculate final payout ────────────────────────────────────────
-        # Cap at exactly duration_days to prevent over-payment.
-        expected_total_profit = round(
-            (fresh_fund.daily_interest / 100.0) * fresh_fund.amount * fresh_fund.duration_days, 6
-        )
-        # Use whichever is larger to avoid under-paying due to missed scheduler cycles.
-        # But never exceed the contracted profit (expected_total_profit is already capped).
-        final_profit = max(fresh_fund.total_profit, expected_total_profit)
-        principal = fresh_fund.amount
-        final_payout = round(principal + final_profit, 6)
+            # ── 3. Mark fund as completed ────────────────────────────────────────
+            fund.status = "completed"
+            fund.total_profit = final_profit
+            fund.today_interest = 0.0
+            db.add(fund)
 
-        # ── 3. Mark fund as completed FIRST (idempotency guard) ──────────────
-        # Flush the status change before crediting the wallet so that a
-        # concurrent scheduler tick will see "completed" and skip this fund.
-        fresh_fund.status = "completed"
-        fresh_fund.total_profit = final_profit
-        fresh_fund.today_interest = 0.0
-        db.add(fresh_fund)
-        await db.flush()   # write to DB within the transaction, not yet committed
+            # ── 4. Credit wallet ─────────────────────────────────────────────────
+            wallet.income = round(wallet.income + final_payout, 6)
+            db.add(wallet)
 
-        # ── 4. Credit wallet (income section) ─────────────────────────────────
-        # Both the principal and the profit are credited to wallet.income.
-        # The investor's original capital is returned alongside the earned profit.
-        wallet.income = round(wallet.income + final_payout, 6)
-        db.add(wallet)
+            # ── 5. Record transactions ───────────────────────────────────────────
+            db.add(Transaction(
+                user_id=fund.user_id,
+                type=TransactionType.WEALTH_FUND_PRINCIPAL_RETURN.value,
+                amount=round(principal, 6),
+                created_at=now,
+            ))
+            db.add(Transaction(
+                user_id=fund.user_id,
+                type=TransactionType.WEALTH_FUND_MATURITY.value,
+                amount=round(final_profit, 6),
+                created_at=now,
+            ))
 
-        # ── 5. Record TWO separate income transactions ────────────────────────
-        # Transaction A: the principal (original investment) returned to the user.
-        db.add(Transaction(
-            user_id=fresh_fund.user_id,
-            type=TransactionType.WEALTH_FUND_PRINCIPAL_RETURN.value,
-            amount=round(principal, 6),
-            created_at=now,
-        ))
-        # Transaction B: the profit earned over the fund duration.
-        db.add(Transaction(
-            user_id=fresh_fund.user_id,
-            type=TransactionType.WEALTH_FUND_MATURITY.value,
-            amount=round(final_profit, 6),
-            created_at=now,
-        ))
+            # ── 6. Invalidate profile cache ──────────────────────────────────────
+            try:
+                await redis_cache.delete(f"user_profile_{fund.user_id}")
+            except Exception as cache_exc:
+                logger.warning(f"Cache invalidation failed for user {fund.user_id}: {cache_exc}")
 
-        # ── 6. Invalidate profile cache so wallet balance refreshes immediately ──
-        try:
-            await redis_cache.delete(f"user_profile_{fresh_fund.user_id}")
-        except Exception as cache_exc:
-            logger.warning(f"Cache invalidation failed for user {fresh_fund.user_id}: {cache_exc}")
+            processed += 1
+            logger.info(
+                f"Fund id={fund.id} matured for user_id={fund.user_id}. "
+                f"Total payout={final_payout} (principal={principal}, profit={final_profit})."
+            )
 
-        processed += 1
-        logger.info(
-            f"Fund id={fresh_fund.id} matured for user_id={fresh_fund.user_id}. "
-            f"Total payout={final_payout} "
-            f"(principal={principal}, profit={final_profit}). "
-            f"Two transactions recorded: WEALTH_FUND_PRINCIPAL_RETURN={principal}, "
-            f"WEALTH_FUND_MATURITY={final_profit}."
-        )
+        # Commit each batch
+        if processed > 0:
+            await db.commit()
 
     if processed:
-        await db.commit()
         logger.info(f"Maturity processing complete: {processed} fund(s) settled.")
     else:
         logger.info("Maturity processing: no funds required settlement.")
