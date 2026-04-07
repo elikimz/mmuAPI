@@ -26,6 +26,7 @@ import asyncio
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
 from app.database.database import AsyncSessionLocal
 from app.routers.userweathfund import complete_matured_funds, update_daily_interest
@@ -40,9 +41,9 @@ _STARTUP_DELAY_SECONDS = int(os.getenv("WEALTHFUND_SCHEDULER_STARTUP_DELAY_SECON
 
 
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_fixed(5),
-    retry=retry_if_exception_type((asyncio.TimeoutError, ConnectionError)),
+    stop=stop_after_attempt(5),
+    wait=wait_fixed(10),
+    retry=retry_if_exception_type((asyncio.TimeoutError, ConnectionError, SQLAlchemyError, OperationalError)),
     reraise=True
 )
 async def run_wealthfund_tasks():
