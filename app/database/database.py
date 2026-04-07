@@ -53,13 +53,24 @@ if "sqlite" not in DATABASE_URL:
 #   pool_size       — max persistent connections per worker
 #   max_overflow    — burst capacity beyond pool_size
 #   pool_timeout    — seconds to wait for a free connection before raising
+# engine = create_async_engine(
+#     DATABASE_URL,
+#     echo=False,
+#     connect_args=connect_args,
+#     pool_size=20,
+#     max_overflow=10,
+#     pool_timeout=30,
+#     pool_recycle=1800,
+#     pool_pre_ping=True,
+# )
+
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
     connect_args=connect_args,
-    pool_size=20,
-    max_overflow=10,
-    pool_timeout=30,
+    pool_size=5,        # Reduce from 20
+    max_overflow=5,     # Reduce from 10
+    pool_timeout=60,    # Increase from 30
     pool_recycle=1800,
     pool_pre_ping=True,
 )
