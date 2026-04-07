@@ -44,11 +44,11 @@ if not DATABASE_URL:
 # ssl.SSLContext object. This is the most portable approach across platforms
 # (local, Docker, Azure App Service, Azure Container Apps).
 connect_args: dict = {
-    "timeout": 90,           # Increase connection timeout for Neon cold start
-    "command_timeout": 90,   # Add command timeout for long-running queries
+    "timeout": 120,           # Further increase connection timeout for Neon cold start
+    "command_timeout": 120,   # Further increase command timeout for long-running queries
 }
-if "sqlite" not in DATABASE_URL:
-    connect_args["ssl"] = "require"
+# if "sqlite" not in DATABASE_URL:
+#     connect_args["ssl"] = "require"
 
 # --- Async Engine ---
 # We use a very high pool_timeout and connection timeout to handle Neon cold starts.
@@ -59,7 +59,7 @@ engine = create_async_engine(
     connect_args=connect_args,
     pool_size=3,         # Minimal pool size for serverless
     max_overflow=2,      # Minimal overflow
-    pool_timeout=90,     # Wait up to 90s for a connection from the pool
+    pool_timeout=120,    # Wait up to 120s for a connection from the pool
     pool_recycle=1800,
     pool_pre_ping=True,
 )
