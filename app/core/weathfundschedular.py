@@ -22,8 +22,10 @@ Fix (Startup Race Condition):
 import logging
 import os
 from datetime import datetime, timedelta
+import asyncio
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 
 from app.database.database import AsyncSessionLocal
 from app.routers.userweathfund import complete_matured_funds, update_daily_interest
@@ -37,6 +39,12 @@ _INTERVAL_MINUTES = int(os.getenv("WEALTHFUND_SCHEDULER_INTERVAL_MINUTES", "5"))
 _STARTUP_DELAY_SECONDS = int(os.getenv("WEALTHFUND_SCHEDULER_STARTUP_DELAY_SECONDS", "30"))
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(5),
+    retry=retry_if_exception_type((asyncio.TimeoutError, ConnectionError)),
+    reraise=True
+)
 async def run_wealthfund_tasks():
     """
     Opens a fresh database session, runs both scheduled tasks, then closes it.
@@ -45,16 +53,26 @@ async def run_wealthfund_tasks():
     run_at = datetime.utcnow()
     logger.info(f"WealthFund scheduler tick at {run_at.isoformat()} UTC")
 
-    async with AsyncSessionLocal() as db:
-        try:
-            await update_daily_interest(db)
-        except Exception as exc:
-            logger.error(f"update_daily_interest failed: {exc}", exc_info=True)
+    # Wrap each task in its own async with AsyncSessionLocal() as db: block
+    # to ensure a fresh session per task and avoid holding connections too long.
+    
+    # Task 1: update_daily_interest
+    try:
+        async with AsyncSessionLocal() as db:
+            await asyncio.wait_for(update_daily_interest(db), timeout=60.0)
+    except asyncio.TimeoutError:
+        logger.error("update_daily_interest timed out after 60 seconds.")
+    except Exception as exc:
+        logger.error(f"update_daily_interest failed: {exc}", exc_info=True)
 
-        try:
-            await complete_matured_funds(db)
-        except Exception as exc:
-            logger.error(f"complete_matured_funds failed: {exc}", exc_info=True)
+    # Task 2: complete_matured_funds
+    try:
+        async with AsyncSessionLocal() as db:
+            await asyncio.wait_for(complete_matured_funds(db), timeout=60.0)
+    except asyncio.TimeoutError:
+        logger.error("complete_matured_funds timed out after 60 seconds.")
+    except Exception as exc:
+        logger.error(f"complete_matured_funds failed: {exc}", exc_info=True)
 
     logger.info(
         f"WealthFund scheduler tick complete "

@@ -20,6 +20,8 @@ async def add_indexes():
             "CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);",
             "CREATE INDEX IF NOT EXISTS idx_deposits_created_at ON deposits(created_at);",
             "CREATE INDEX IF NOT EXISTS idx_withdrawals_created_at ON withdrawals(created_at);",
+            "CREATE INDEX IF NOT EXISTS idx_user_wealthfunds_status_end_date ON user_wealthfunds (status, end_date);",
+            "CREATE INDEX IF NOT EXISTS idx_user_wealthfunds_status_last_interest_update ON user_wealthfunds (status, last_interest_update);",
         ]
         for query in queries:
             try:

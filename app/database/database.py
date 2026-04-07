@@ -42,7 +42,7 @@ if not DATABASE_URL:
 # asyncpg accepts the string 'require' to enforce SSL without needing a full
 # ssl.SSLContext object. This is the most portable approach across platforms
 # (local, Docker, Azure App Service, Azure Container Apps).
-connect_args: dict = {}
+connect_args: dict = {"timeout": 30}
 if "sqlite" not in DATABASE_URL:
     connect_args["ssl"] = "require"
 
@@ -70,7 +70,7 @@ engine = create_async_engine(
     connect_args=connect_args,
     pool_size=5,        # Reduce from 20
     max_overflow=5,     # Reduce from 10
-    pool_timeout=60,    # Increase from 30
+    pool_timeout=30,    # Set to 30 as per user request
     pool_recycle=1800,
     pool_pre_ping=True,
 )
