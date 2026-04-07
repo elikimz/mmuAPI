@@ -22,6 +22,7 @@ import os
 import logging
 from dotenv import load_dotenv
 
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 
@@ -43,37 +44,22 @@ if not DATABASE_URL:
 # ssl.SSLContext object. This is the most portable approach across platforms
 # (local, Docker, Azure App Service, Azure Container Apps).
 connect_args: dict = {
-    "timeout": 60,           # Increase connection timeout for Neon cold start
-    "command_timeout": 60,   # Add command timeout for long-running queries
+    "timeout": 90,           # Increase connection timeout for Neon cold start
+    "command_timeout": 90,   # Add command timeout for long-running queries
 }
 if "sqlite" not in DATABASE_URL:
     connect_args["ssl"] = "require"
 
 # --- Async Engine ---
-# Pool settings tuned for Azure App Service + Neon serverless pooler:
-#   pool_pre_ping   — verifies connection liveness before use (prevents 'closed' errors)
-#   pool_recycle    — recycles connections every 30 min to avoid Neon idle timeouts
-#   pool_size       — max persistent connections per worker
-#   max_overflow    — burst capacity beyond pool_size
-#   pool_timeout    — seconds to wait for a free connection before raising
-# engine = create_async_engine(
-#     DATABASE_URL,
-#     echo=False,
-#     connect_args=connect_args,
-#     pool_size=20,
-#     max_overflow=10,
-#     pool_timeout=30,
-#     pool_recycle=1800,
-#     pool_pre_ping=True,
-# )
-
+# We use a very high pool_timeout and connection timeout to handle Neon cold starts.
+# Neon can take up to 50-60 seconds to wake up from a cold state.
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
     connect_args=connect_args,
-    pool_size=5,        # Reduce from 20
-    max_overflow=5,     # Reduce from 10
-    pool_timeout=30,    # Set to 30 as per user request
+    pool_size=3,         # Minimal pool size for serverless
+    max_overflow=2,      # Minimal overflow
+    pool_timeout=90,     # Wait up to 90s for a connection from the pool
     pool_recycle=1800,
     pool_pre_ping=True,
 )
